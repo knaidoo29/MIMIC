@@ -10,15 +10,15 @@
 
 ## Dependencies
 
-* `numpy`
-* `scipy`
-* `magpie`
+* [`numpy`](http://www.numpy.org/)
+* [`scipy`](https://scipy.org/)
+* [`magpie`](https://magpie-doc.readthedocs.io/)
 
 For multiprocessing functionality:
 
-* `mpi4py`
-* `mpi4py-fft`
-* `MPIutils` -- Included in git repository.
+* [`mpi4py`](https://mpi4py.readthedocs.io/)
+* [`mpi4py-fft`](https://mpi4py-fft.readthedocs.io/)
+* [`MPIutils`](https://github.com/knaidoo29/MPIutils) -- Included in git repository.
 
 
 ## Installation
