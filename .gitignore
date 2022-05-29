@@ -1,0 +1,3 @@
+build/*
+dist/*
+mimic.egg-info/*

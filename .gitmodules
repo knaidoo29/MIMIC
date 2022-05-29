@@ -1,0 +1,3 @@
+[submodule "MPIutils"]
+	path = MPIutils
+	url = https://github.com/knaidoo29/MPIutils
