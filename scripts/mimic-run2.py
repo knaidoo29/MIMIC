@@ -749,6 +749,7 @@ if ERROR is False:
                      z=cons['z_rza']-halfsize, ex=cons['ex_rza'], ey=cons['ey_rza'], ez=cons['ez_rza'],
                      u=cons['u_rza'], u_err=cons['u_err_rza'])
 
+# STOPPED HERE
 
 if ERROR is False:
     if params["Run"]["CR"] is True or params["Run"]["IC"] is True:

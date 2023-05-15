@@ -50,7 +50,8 @@ class MIMIC:
         """Initialise the MIMIC main class."""
         # Global variables
         self.MPI = MPI
-        self.FFT = False
+        self.FFT = None
+        self.FFT_Ngrid = None
         self.ERROR = False
 
         # Time Variables
@@ -60,7 +61,9 @@ class MIMIC:
             "Prep_Start": None,
             "Prep_End": None,
             "WF_Start": None,
-            "WF_End": None
+            "WF_End": None,
+            "RZA_Start": None,
+            "RZA_End": None
         }
 
         # Parameters
@@ -130,6 +133,10 @@ class MIMIC:
         self.y3D = None
         self.z3D = None
         self.x_shape = None
+        self.kx3D = None
+        self.ky3D = None
+        self.kz3D = None
+        self.k_shape = None
         # correlators
         self.corr_r = None
         self.corr_xi = None
@@ -141,6 +148,8 @@ class MIMIC:
         self.interp_psiR = None
         self.interp_psiT = None
         self.eta = None
+        # store
+        self.WF_dens = None
         # output
         self.fname_prefix = None
 
@@ -304,6 +313,7 @@ class MIMIC:
         if self.what2run["RZA"]:
             self.what2run["WF"] = True
 
+
         if self._check_param_key(params["Run"], "CR"):
             self.what2run["CR"] = bool(params["Run"]["CR"])
         else:
@@ -453,6 +463,12 @@ class MIMIC:
         self.cons_u_err = self.cons_u_err[cond]
 
 
+    def prep_extra(self):
+        self.SBX = fiesta.coords.MPI_SortByX(self.MPI)
+        self.SBX.settings(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+        self.SBX.limits4grid()
+
+
     def save_correlators(self):
         if self.MPI.rank == 0:
             fname_prefix = self._get_fname_prefix()
@@ -582,6 +598,32 @@ class MIMIC:
         self.z3D = self.z3D.reshape(self.x_shape)
 
 
+    def get_grid_mag(self):
+        return np.sqrt(self.x3D**2. + self.y3D**2. + self.z3D**2.)
+
+
+    def get_kgrid3D(self):
+        self.MPI.mpi_print_zero(" - Construct Fourier grid")
+        self.kx3D, self.ky3D, self.kz3D = shift.cart.mpi_kgrid3D(self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+        self.k_shape = np.shape(self.kx3D)
+
+
+    def flatten_kgrid3D(self):
+        self.kx3D = self.kx3D.flatten()
+        self.ky3D = self.ky3D.flatten()
+        self.kz3D = self.kz3D.flatten()
+
+
+    def unflatten_kgrid3D(self):
+        self.kx3D = self.kx3D.reshape(self.k_shape)
+        self.ky3D = self.ky3D.reshape(self.k_shape)
+        self.kz3D = self.kz3D.reshape(self.k_shape)
+
+
+    def get_kgrid_mag(self):
+        return np.sqrt(self.kx3D**2. + self.ky3D**2. + self.kz3D**2.)
+
+
     def _get_WF_single(self, x, y, z, adot, i, total):
         rx = self.cons_x - x
         ry = self.cons_y - y
@@ -595,6 +637,7 @@ class MIMIC:
         if self.MPI.rank == 0:
             utils.progress_bar(i, total, explanation=" ---- ", indexing=True)
         return du.dot(self.eta)
+
 
     def save_WF(self, WF_dens):
         fname_prefix = self._get_fname_prefix()
@@ -630,6 +673,178 @@ class MIMIC:
 
         self.save_WF(WF_dens)
 
+        if self.what2run["RZA"]:
+            self.WF_dens = WF_dens
+
+
+    def start_FFT(self, Ngrid):
+        if self.FFT is None or self.FFT_Ngrid != Ngrid:
+            self.FFT_Ngrid = Ngrid
+            Ngrids = np.array([Ngrid, Ngrid, Ngrid], dtype=int)
+            self.FFT = self.MPI.mpi_fft_start(Ngrids)
+
+
+    def complex_zeros(self, shape):
+        return np.zeros(shape) + 1j*np.zeros(shape)
+
+
+    def dens2psi(self, dens):
+        self.start_FFT(self.siminfo["Ngrid"])
+        self.get_kgrid3D()
+        kmag = self.get_kgrid_mag()
+        densk = shift.cart.mpi_fft3D(dens, self.x_shape, self.siminfo["Boxsize"],
+            self.siminfo["Ngrid"], self.FFT)
+        psi_kx = self.complex_zeros(self.k_shape)
+        psi_ky = self.complex_zeros(self.k_shape)
+        psi_kz = self.complex_zeros(self.k_shape)
+        cond = np.where(kmag != 0.)
+        psi_kx[cond] = densk[cond] * 1j * self.kx3D[cond]/(kmag[cond]**2.)
+        psi_ky[cond] = densk[cond] * 1j * self.ky3D[cond]/(kmag[cond]**2.)
+        psi_kz[cond] = densk[cond] * 1j * self.kz3D[cond]/(kmag[cond]**2.)
+        psi_x = shift.cart.mpi_ifft3D(psi_kx, self.x_shape, self.siminfo["Boxsize"],
+            self.siminfo["Ngrid"], self.FFT)
+        psi_y = shift.cart.mpi_ifft3D(psi_ky, self.x_shape, self.siminfo["Boxsize"],
+            self.siminfo["Ngrid"], self.FFT)
+        psi_z = shift.cart.mpi_ifft3D(psi_kz, self.x_shape, self.siminfo["Boxsize"],
+            self.siminfo["Ngrid"], self.FFT)
+        return psi_x, psi_y, psi_z
+
+
+    def psi2vel(self, redshift, psi_x, psi_y, psi_z):
+        #z0 = self.constraints["z_eff"]
+        z0 = redshift
+        Hz = self.interp_Hz(z0)
+
+        if self.constraints["Type"] == "Vel":
+            adot = theory.z2a(z0)*Hz
+        elif self.constraints["Type"] == "Psi":
+            adot = 1.
+
+        if self.cosmo["ScaleDepGrowth"]:
+            self.start_FFT(self.siminfo["Ngrid"])
+            self.get_kgrid3D()
+            kmag = self.get_kgrid_mag()
+
+            vel_kx = shift.cart.mpi_fft3D(psi_x, self.x_shape, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], self.FFT)
+            vel_ky = shift.cart.mpi_fft3D(psi_y, self.x_shape, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], self.FFT)
+            vel_kz = shift.cart.mpi_fft3D(psi_z, self.x_shape, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], self.FFT)
+
+            cond = np.where(kmag != 0.)
+            fk = self._get_growth_f(z0, kmag=kmag[cond])
+            vel_kx[cond] = adot*fk*psi_kx[cond]
+            vel_ky[cond] = adot*fk*psi_ky[cond]
+            vel_kz[cond] = adot*fk*psi_kz[cond]
+
+            vel_x = shift.cart.mpi_ifft3D(vel_kx, self.x_shape, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], self.FFT)
+            vel_y = shift.cart.mpi_ifft3D(vel_ky, self.x_shape, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], self.FFT)
+            vel_z = shift.cart.mpi_ifft3D(vel_kz, self.x_shape, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], self.FFT)
+
+        else:
+            fz = self._get_growth_f(z0)
+            vel_x = adot*fz*psi_x
+            vel_y = adot*fz*psi_y
+            vel_z = adot*fz*psi_z
+
+        return vel_x, vel_y, vel_z
+
+
+    def add_buffer_in_x(self, f):
+        f_send_down = self.MPI.send_down(f[0])
+        f_send_up = self.MPI.send_up(f[-1])
+        fnew = np.concatenate([np.array([f_send_up]), f, np.array([f_send_down])])
+        return fnew
+
+    def get_buffer_range(self):
+        dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
+        xmin = np.min(self.x3D) - dx/2. - dx
+        xmax = np.max(self.x3D) + dx/2. + dx
+        return xmin, xmax
+
+    def unbuffer_in_x(self, f):
+        fnew = f[1:-1]
+        return fnew
+
+    def get_RZA(self):
+        self.MPI.mpi_print_zero()
+        self.MPI.mpi_print_zero(" Apply Reverse Zeldovich Approximation")
+        self.MPI.mpi_print_zero(" =====================================")
+        self.MPI.mpi_print_zero()
+
+        self.MPI.mpi_print_zero(" - Converting WF density to displacement Psi")
+        self.MPI.mpi_print_zero()
+
+        psi_x, psi_y, psi_z = self.dens2psi(self.WF_dens)
+        psi_x = self.add_buffer_in_x(psi_x)
+        psi_y = self.add_buffer_in_x(psi_y)
+        psi_z = self.add_buffer_in_x(psi_z)
+        xmin, xmax = self.get_buffer_range()
+
+        if self.MPI.rank == 0:
+            data = np.column_stack([self.cons_x, self.cons_y, self.cons_z, self.cons_ex,
+                self.cons_ey, self.cons_ez, self.cons_u, self.cons_u_err])
+        else:
+            data = None
+        self.SBX.input(data)
+        data = self.SBX.distribute()
+        cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez, cons_u, cons_u_err = \
+            data[:,0], data[:,1], data[:,2], data[:,3], data[:,4], data[:,5], data[:,6], data[:,7]
+
+        self.MPI.mpi_print_zero(" - Interpolating displacement Psi at constraint points")
+        self.MPI.mpi_print_zero()
+
+        if len(cons_x) != 0:
+            cons_psi_x = fiesta.interp.trilinear(psi_x, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
+            cons_psi_y = fiesta.interp.trilinear(psi_y, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
+            cons_psi_z = fiesta.interp.trilinear(psi_z, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
+        else:
+            cons_psi_x, cons_psi_y, cons_psi_z = None, None, None
+        self.MPI.wait()
+
+        self.MPI.mpi_print_zero(" - Applying RZA")
+        self.MPI.mpi_print_zero()
+
+        cons_rza_x = cons_x - cons_psi_x
+        cons_rza_y = cons_y - cons_psi_y
+        cons_rza_z = cons_z - cons_psi_z
+        cons_rza_x -= self.halfsize
+        cons_rza_y -= self.halfsize
+        cons_rza_z -= self.halfsize
+        # This assumes Method II of https://theses.hal.science/tel-01127294/document see page 121
+        cons_rza_ex = np.copy(cons_ex)
+        cons_rza_ey = np.copy(cons_ey)
+        cons_rza_ez = np.copy(cons_ez)
+        cons_rza_u = np.copy(cons_u)
+        cons_rza_u_err = np.copy(cons_u_err)
+
+        cons_rza_x = self.MPI.collect(cons_rza_x)
+        cons_rza_y = self.MPI.collect(cons_rza_y)
+        cons_rza_z = self.MPI.collect(cons_rza_z)
+
+        cons_rza_ex = self.MPI.collect(cons_rza_ex)
+        cons_rza_ey = self.MPI.collect(cons_rza_ey)
+        cons_rza_ez = self.MPI.collect(cons_rza_ez)
+
+        cons_rza_u = self.MPI.collect(cons_rza_u)
+        cons_rza_u_err = self.MPI.collect(cons_rza_u_err)
+
+        fname = self._get_fname_prefix() + 'rza.npz'
+        self.MPI.mpi_print_zero(" - Saving RZA constraints to: %s" % fname)
+        self.MPI.mpi_print_zero()
+        if self.MPI.rank == 0:
+            np.savez(fname, x=cons_rza_x, y=cons_rza_y, z=cons_rza_z,
+                ex=cons_ex, ey=cons_ey, ez=cons_ez, u=cons_rza_u, u_err=cons_rza_u_err)
+
+    ## HERE ##
+
 
     def run(self, yaml_fname):
         """Run MIMIC."""
@@ -639,14 +854,20 @@ class MIMIC:
         self.time["Prep_Start"] = time.time()
         self.prep_theory()
         self.prep_constraints()
+        self.prep_extra()
         self.calc_correlators(self.constraints["z_eff"])
         self.compute_eta()
         self.time["Prep_End"] = time.time()
 
-        self.time["WF_Start"] = time.time()
-        self.get_WF()
-        self.time["WF_End"] = time.time()
+        if self.what2run["WF"]:
+            self.time["WF_Start"] = time.time()
+            self.get_WF()
+            self.time["WF_End"] = time.time()
 
+        if self.what2run["WF"]:
+            self.time["RZA_Start"] = time.time()
+            self.get_RZA()
+            self.time["RZA_End"] = time.time()
         self.end()
 
 
@@ -683,7 +904,10 @@ class MIMIC:
         self.MPI.mpi_print_zero()
 
         self._print_time(" -> Preparation\t\t= ", self.time["Prep_End"] - self.time["Prep_Start"])
-        self._print_time(" -> Wiener Filter\t= ", self.time["WF_End"] - self.time["WF_Start"])
+        if self.what2run["WF"]:
+            self._print_time(" -> Wiener Filter\t= ", self.time["WF_End"] - self.time["WF_Start"])
+        if self.what2run["RZA"]:
+            self._print_time(" -> Rev. Zel. Approx.\t= ", self.time["RZA_End"] - self.time["RZA_Start"])
 
         self.MPI.mpi_print_zero()
         self._print_time(" -> Total\t\t= ", self.time["End"] - self.time["Start"])
