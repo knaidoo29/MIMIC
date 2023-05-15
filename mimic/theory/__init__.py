@@ -7,6 +7,9 @@ from .correlators import pk2xi
 from .correlators import pk2zeta
 from .correlators import pk2psiR
 from .correlators import pk2psiT
+from .correlators import get_cov_dd
+from .correlators import get_cov_du
+from .correlators import get_cov_uu
 
 from .numerical import num_diff
 from .numerical import get_num_Dzk

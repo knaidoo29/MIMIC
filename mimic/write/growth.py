@@ -3,15 +3,15 @@ import numpy as np
 from .. import utils
 
 
-def write_scale_ind_growth(fname, redshift, Dz, fz, ftype='ascii', writelevel=2,
+def write_scale_ind_growth(fname_prefix, redshifts, Dz, fz, ftype='ascii', writelevel=2,
                            verbose=True):
     """Write scale-independent growth functions.
 
     Parameters
     ----------
-    fname : str
-        Scale-independent growth functions.
-    redshift : array
+    fname_prefix : str
+        Scale-independent growth functions prefix for filename.
+    redshifts : array
         Redshift array.
     Dz : array
         Growth function.
@@ -26,15 +26,15 @@ def write_scale_ind_growth(fname, redshift, Dz, fz, ftype='ascii', writelevel=2,
     """
     if ftype == 'ascii':
         # write scale-independent growth functions
-        utils.printout('Writing ascii file: '+fname+'_growth_scale_ind.txt', writelevel, verbose)
-        np.savetxt(fname + '_growth_scale_ind.txt', np.dstack([redshift, Dz, fz])[0], header="z\t D(z)\t f(z)", fmt="%.6f")
+        utils.printout('Writing ascii file: '+fname_prefix+'_growth_scale_ind.txt', writelevel, verbose)
+        np.savetxt(fname_prefix + '_growth_scale_ind.txt', np.dstack([redshift, Dz, fz])[0], header="z\t D(z)\t f(z)", fmt="%.6f")
     elif ftype == 'numpy':
         # write scale-independent growth functions
-        utils.printout('Writing numpy file: '+fname+'_growth_scale_ind.npy', writelevel, verbose)
-        np.savetxt(fname + '_growth_scale_ind.npy', redshift=redshift, Dz=Dz, fz=fz)
+        utils.printout('Writing numpy file: '+fname_prefix+'_growth_scale_ind.npy', writelevel, verbose)
+        np.savez(fname_prefix + '_growth_scale_ind.npz', redshifts=redshifts, Dz=Dz, fz=fz)
 
 
-def write_scale_dep_growth(fname_prefix, redshift, kh, Dzk, fzk, ftype='ascii',
+def write_scale_dep_growth(fname_prefix, redshifts, kh, Dzk, fzk, ftype='ascii',
                            writelevel=2, verbose=True):
     """Write scale-dependent growth functions.
 
@@ -42,7 +42,7 @@ def write_scale_dep_growth(fname_prefix, redshift, kh, Dzk, fzk, ftype='ascii',
     ----------
     fname_prefix : str
         Scale-dependent growth functions.
-    redshift : array
+    redshifts : array
         Redshift array.
     kh : array
         Fourier-modes array.
@@ -60,7 +60,7 @@ def write_scale_dep_growth(fname_prefix, redshift, kh, Dzk, fzk, ftype='ascii',
     if ftype == 'ascii':
         # write scale-dependent redshift values
         utils.printout('Writing ascii file: '+fname_prefix+'_growth_scale_dep_z.txt', writelevel, verbose)
-        np.savetxt(fname_prefix + '_growth_scale_dep_z.txt', redshift, fmt="%.6f")
+        np.savetxt(fname_prefix + '_growth_scale_dep_z.txt', redshifts, fmt="%.6f")
         # write scale-dependent Fourier modes
         utils.printout('Writing ascii file: '+fname_prefix+'_growth_scale_dep_k.txt', writelevel, verbose)
         np.savetxt(fname_prefix + '_growth_scale_dep_k.txt', kh, fmt="%.6f")
@@ -73,4 +73,4 @@ def write_scale_dep_growth(fname_prefix, redshift, kh, Dzk, fzk, ftype='ascii',
     elif ftype == 'numpy':
         # write scale-dependent growth functions
         utils.printout('Writing numpy file: '+fname_prefix+'_growth_scale_dep.npy', writelevel, verbose)
-        np.savetxt(fname_prefix + '_growth_scale_dep.npy', redshift=redshift, kh=kh, Dzk=Dzk, fzk=fzk)
+        np.savez(fname_prefix + '_growth_scale_dep.npz', redshifts=redshifts, kh=kh, Dzk=Dzk, fzk=fzk)

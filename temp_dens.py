@@ -62,6 +62,7 @@ for i in range(1, 5+1):
 
         Ak_part = MPI.check_partition(Ngrids, np.array(np.shape(Ak)))
         kx3d, ky3d, kz3d = MPI.create_split_ndgrid([kx, ky, kz], Ak_part)
+        create_split_ndgrid(self, arrays_nd, whichaxis)
 
         k = np.sqrt(kx3d**2. + ky3d**2. + kz3d**2.)
 

@@ -13,7 +13,7 @@ with open(path.join(this_directory, 'README.md')) as f:
 exts = []#ext1]
 
 setup(name = 'mimic',
-      version = '0.0.0-alpha-0',
+      version = '0.0.0-alpha-1',
       description       = "Model Independent cosMological constrained Initial Conditions",
       long_description  = long_description,
       long_description_content_type = 'text/markdown',

@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.integrate import simps
 from . import basics
 
 
@@ -63,12 +64,12 @@ def num_diff(x, f, equal_spacing=False, interpgrid=1000, kind='cubic'):
     return df
 
 
-def get_num_Dzk(redshift, kh, pks):
+def get_num_Dzk(redshifts, kh, pks):
     """Numerically computes the scale-dependent growth functions D(z,k).
 
     Parameters
     ----------
-    redshift : array
+    redshifts : array
         Redshift values.
     kh : array
         K values for the power spectrum.
@@ -80,7 +81,7 @@ def get_num_Dzk(redshift, kh, pks):
     Dzk : 2darray
         Numerical the scale-dependent growth functions.
     """
-    cond = np.where(redshift == 0.)[0]
+    cond = np.where(redshifts == 0.)[0][0]
     pk_z_0 = pks[cond]
     Dzk = []
     for i in range(0, len(pks)):
@@ -90,12 +91,12 @@ def get_num_Dzk(redshift, kh, pks):
     return Dzk
 
 
-def get_num_fz(redshift, Dz, **kwargs):
+def get_num_fz(redshifts, Dz, **kwargs):
     """Numerically computes the linear growth rate.
 
     Parameters
     ----------
-    redshift : array
+    redshifts : array
         Redshift values.
     Dz : array
         Linear growth function.
@@ -105,12 +106,14 @@ def get_num_fz(redshift, Dz, **kwargs):
     fz : array
         Numerical growth rate f(z).
     """
-    dz = z[1:] - z[:-1]
+    dz = redshifts[1:] - redshifts[:-1]
     if any(dz > 0.):
         usereverse = True
-        z = np.copy(z[::-1])
+        redshifts = np.copy(redshifts[::-1])
         Dz = np.copy(Dz[::-1])
-    a = basics.z2a(z)
+    else:
+        usereverse = False
+    a = basics.z2a(redshifts)
     loga = np.log(a)
     logD = np.log(Dz)
     fz = num_diff(loga, logD, **kwargs)
@@ -119,12 +122,12 @@ def get_num_fz(redshift, Dz, **kwargs):
     return fz
 
 
-def get_num_fzk(redshift, kh, Dzk):
+def get_num_fzk(redshifts, kh, Dzk):
     """Numerically computed scale-dependent growth rate f(z,k).
 
     Parameters
     ----------
-    redshift : array
+    redshifts : array
         Redshift values.
     kh : array
         K values for the power spectrum.
@@ -142,14 +145,12 @@ def get_num_fzk(redshift, kh, Dzk):
     return fzk
 
 
-def get_mean_Dz(redshift, kh, Dzk, kmin=0.001, kmax=10.):
+def get_mean_Dz(kh, Dzk, kmin=0.001, kmax=10.):
     """Returns the mean growth function from the scale dependent growth
     function.
 
     Parameters
     ----------
-    redshift : array
-        Redshift values.
     kh : array
         K values for the power spectrum.
     Dzk : 2darray
@@ -164,16 +165,14 @@ def get_mean_Dz(redshift, kh, Dzk, kmin=0.001, kmax=10.):
     """
     cond = np.where((kh >= kmin) & (kh <= kmax))[0]
     Dz = np.mean(Dzk[:,cond], axis=1)
-    return redshift, Dz
+    return Dz
 
 
-def get_mean_fz(redshift, kh, fzk, kmin=0.001, kmax=10.):
+def get_mean_fz(kh, fzk, kmin=0.001, kmax=10.):
     """Returns the mean growth rate from the scale dependent growth rate.
 
     Parameters
     ----------
-    redshift : array
-        Redshift values.
     kh : array
         K values for the power spectrum.
     fzk : 2darray
@@ -188,4 +187,52 @@ def get_mean_fz(redshift, kh, fzk, kmin=0.001, kmax=10.):
     """
     cond = np.where((kh >= kmin) & (kh <= kmax))[0]
     fz = np.mean(fzk[:,cond], axis=1)
-    return redshift, fz
+    return fz
+
+
+def get_sigmaR(kh, pk, R=8., kmin=None, kmax=None):
+    """Returns sigmaR, default is sigma8.
+
+    Parameters
+    ----------
+    kh : array
+        K values for the power spectrum.
+    pk : array
+        Power spectrum.
+    R : float, optional
+        Scale, default is 8.
+    kmin : float, optional
+        Minimum k for sigmaR integration.
+    kmax : float, optional
+        Maximum k for sigmaR integration.
+
+    Returns
+    -------
+    sigmaR : float
+        The value of sigmaR.
+
+    Notes
+    -----
+    Calculating sigmaR:
+    sigma_R = [int_0 ^infty w^{2}(kR) Deltak^{2} dk]^0.5
+    Where:
+    w(x) = (3/x^3)*(sin(x) - x*cos(x))
+    Deltak^2 = k^{2} P(k)/(2pi^2)
+    """
+    # First we're going to interpolate values of the power spectrum with equal
+    # spaced bins.
+    interp_PK = interp1d(kh, pk, kind='cubic')
+    if kmin is None:
+        kmin = kh.min()
+    if kmax is None:
+        kmax = kh.max()
+    kscale = 2.*np.pi/R
+    kbins = 100*int((kmax - kmin)/kscale)
+    k = np.linspace(kmin, kmax, kbins)
+    p = interp_PK(k)
+    Deltak2 = (k**2.)*p/(2.*(np.pi**2.))
+    wkR = (3./((k*R)**3.))*(np.sin(k*R) - (k*R)*np.cos(k*R))
+    # Use scipy sample integration evaluation using the simpson rule
+    sigmaR2 = simps((wkR**2.)*Deltak2, k)
+    sigmaR = np.sqrt(sigmaR2)
+    return sigmaR

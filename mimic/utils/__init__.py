@@ -1,3 +1,5 @@
 
-from .printutils import printout
-from .printutils import printspace
+from .print_utils import printout
+from .print_utils import printspace
+
+from .progress import progress_bar
