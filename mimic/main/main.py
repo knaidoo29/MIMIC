@@ -141,7 +141,8 @@ class MIMIC:
             "CovFile": None,
             "Sigma_NR": None,
             "Type": None,
-            "KeepFrac": None
+            "KeepFrac": 1.,
+            "RZA_Method": 2
         }
         self.outputs = {
             "OutputFolder": None,
@@ -313,7 +314,6 @@ class MIMIC:
             self.constraints["CovFile"] = params["Constraints"]["CovFile"]
             self.constraints["Sigma_NR"] = float(params["Constraints"]["Sigma_NR"])
             self.constraints["Type"] = str(params["Constraints"]["Type"])
-            self.constraints["KeepFrac"] = str(params["Constraints"]["KeepFrac"])
 
             self.MPI.mpi_print_zero()
             self._check_exist(self.constraints["Fname"])
@@ -328,7 +328,17 @@ class MIMIC:
             self.MPI.mpi_print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
             self.MPI.mpi_print_zero(" - Sigma_NR \t\t=", self.constraints["Sigma_NR"])
             self.MPI.mpi_print_zero(" - Type \t\t=", self.constraints["Type"])
-            self.MPI.mpi_print_zero(" - KeepFrac \t\t=", self.constraints["KeepFrac"])
+
+            # Optional parameter, will only keep constraints with
+            # KeepFrac*Halfsize radius from the center
+            if self._check_param_key(params["Constraints"], "KeepFrac"):
+                self.constraints["KeepFrac"] = float(params["Constraints"]["KeepFrac"])
+                self.MPI.mpi_print_zero(" - KeepFrac \t\t=", self.constraints["KeepFrac"])
+
+            # Defines RZA Method -- for future use not currently implemented.
+            if self._check_param_key(params["Constraints"], "RZA_Method"):
+                self.constraints["RZA_Method"] = int(params["Constraints"]["RZA_Method"])
+                self.MPI.mpi_print_zero(" - RZA_Method \t\t=", self.constraints["RZA_Method"])
 
             if self._check_param_key(params["Constraints"], "WF"):
                 self.what2run["WF"] = bool(params["Constraints"]["WF"])
@@ -669,9 +679,10 @@ class MIMIC:
 
 
     def get_kgrid3D(self):
-        self.MPI.mpi_print_zero(" - Construct Fourier grid")
-        self.kx3D, self.ky3D, self.kz3D = shift.cart.mpi_kgrid3D(self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
-        self.k_shape = np.shape(self.kx3D)
+        if self.kx3D is None:
+            self.MPI.mpi_print_zero(" - Construct Fourier grid")
+            self.kx3D, self.ky3D, self.kz3D = shift.cart.mpi_kgrid3D(self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+            self.k_shape = np.shape(self.kx3D)
 
 
     def flatten_kgrid3D(self):
@@ -920,15 +931,31 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Applying RZA")
         self.MPI.mpi_print_zero()
 
-        cons_rza_x = cons_x - cons_psi_x
-        cons_rza_y = cons_y - cons_psi_y
-        cons_rza_z = cons_z - cons_psi_z
-        # This assumes Method II of https://theses.hal.science/tel-01127294/document see page 121
-        cons_rza_ex = np.copy(cons_ex)
-        cons_rza_ey = np.copy(cons_ey)
-        cons_rza_ez = np.copy(cons_ez)
-        cons_rza_u = np.copy(cons_u)
-        cons_rza_u_err = np.copy(cons_u_err)
+        if self.constraints["RZA_Method"] == 2:
+            # This assumes Method II of https://theses.hal.science/tel-01127294/document see page 121
+            cons_rza_x = cons_x - cons_psi_x
+            cons_rza_y = cons_y - cons_psi_y
+            cons_rza_z = cons_z - cons_psi_z
+            cons_rza_ex = np.copy(cons_ex)
+            cons_rza_ey = np.copy(cons_ey)
+            cons_rza_ez = np.copy(cons_ez)
+            cons_rza_u = np.copy(cons_u)
+            cons_rza_u_err = np.copy(cons_u_err)
+
+        # elif self.constraints["RZA_Method"] == 3:
+        #     # See above paper for Method III
+        #     cons_rza_x = cons_x - cons_psi_x
+        #     cons_rza_y = cons_y - cons_psi_y
+        #     cons_rza_z = cons_z - cons_psi_z
+        #     cons_rza_ex = np.copy(cons_ex)
+        #     cons_rza_ey = np.copy(cons_ey)
+        #     cons_rza_ez = np.copy(cons_ez)
+        #     cons_rza_u = np.copy(cons_u)
+        #     cons_rza_u_err = np.zeros(len(cons_u_err))
+        #     cons_rza_u = np.sqrt(cons_rza_x**2. + cons_rza_y**2. + cons_rza_z**2.)
+        #     cons_rza_ex = cons_rza_x / cons_rza_u
+        #     cons_rza_ey = cons_rza_y / cons_rza_u
+        #     cons_rza_ez = cons_rza_z / cons_rza_u
 
         self.cons_x = self.MPI.collect_noNone(cons_rza_x)
         self.cons_y = self.MPI.collect_noNone(cons_rza_y)
@@ -1259,26 +1286,28 @@ class MIMIC:
         self.end()
 
 
-    def _print_time(self, prefix, time):
+    def _print_time(self, prefix, time_val):
         """Compute print time.
 
         Parameters
         ----------
         prefix: str
             Prefix to time ouptut.
-        time : float
+        time_val : float
             Time.
         """
-        if time < 1.:
-            self.MPI.mpi_print_zero(prefix, "%0.6f seconds" % time)
-        elif time < 60:
-            self.MPI.mpi_print_zero(prefix, "%0.2f seconds" % time)
-        elif time < 60*60:
-            time /= 60
-            self.MPI.mpi_print_zero(prefix, "%0.2f minutes" % time)
+        if time_val < 0.01:
+            self.MPI.mpi_print_zero(prefix, "%7.4f s" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
+        elif time_val < 1.:
+            self.MPI.mpi_print_zero(prefix, "%7.2f s" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
+        elif time_val < 60:
+            self.MPI.mpi_print_zero(prefix, "%7.2f s" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
+        elif time_val < 60*60:
+            time_val /= 60
+            self.MPI.mpi_print_zero(prefix, "%7.2f m" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
         else:
-            time /= 60*60
-            self.MPI.mpi_print_zero(prefix, "%0.2f hours" % time)
+            time_val /= 60*60
+            self.MPI.mpi_print_zero(prefix, "%7.2f h" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
 
 
     def end(self):
