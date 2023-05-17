@@ -9,11 +9,13 @@ this_directory = path.abspath(path.dirname(__file__))
 with open(path.join(this_directory, 'README.md')) as f:
     long_description = f.read()
 
-#ext1 = Extension(name='mistreev2.src.linalg', sources=['mistreev2/src/linalg.f90'])
-exts = []#ext1]
+ext1 = Extension(name='mimic.src.interp', sources=['mimic/src/interp.f90'])
+ext2 = Extension(name='mimic.src.progress', sources=['mimic/src/progress.f90'])
+ext3 = Extension(name='mimic.src.fast_eta', sources=['mimic/src/fast_eta.f90'])
+exts = [ext1, ext2, ext3]
 
 setup(name = 'mimic',
-      version = '0.0.0-alpha-1',
+      version = "0.2.0",
       description       = "Model Independent cosMological constrained Initial Conditions",
       long_description  = long_description,
       long_description_content_type = 'text/markdown',

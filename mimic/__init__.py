@@ -1,5 +1,6 @@
 
 from . import main
+from . import src
 from . import randoms
 from . import read
 from . import theory

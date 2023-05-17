@@ -3,3 +3,4 @@ dist/*
 mimic.egg-info/*
 tests/*
 tests_F5/*
+*.DS_Store
