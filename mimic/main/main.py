@@ -974,6 +974,16 @@ class MIMIC:
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
             cons_psi_z = fiesta.interp.trilinear(psi_z, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
+            # x_shape = self.x_shape
+            # dx = (xmax-xmin)/(x_shape[0]+2)
+            # ix = np.floor((cons_x - xmin)/dx).astype('int')
+            # dy = (self.siminfo["Boxsize"])/x_shape[1]
+            # iy = np.floor((cons_y)/dy).astype('int')
+            # dz = (self.siminfo["Boxsize"])/x_shape[2]
+            # iz = np.floor((cons_z)/dz).astype('int')
+            # cons_psi_x = psi_x[ix,iy,iz]
+            # cons_psi_y = psi_y[ix,iy,iz]
+            # cons_psi_z = psi_z[ix,iy,iz]
         else:
             cons_psi_x, cons_psi_y, cons_psi_z = None, None, None
 

@@ -20,7 +20,7 @@ fiesta_ext3 = Extension(name='mimic.ext.fiesta.src.trilinear', sources=['mimic/e
 exts = [fiesta_ext1, fiesta_ext2, fiesta_ext3, ext1, ext2, ext3]
 
 setup(name = 'mimic',
-      version = "1.0.0",
+      version = "1.0.1",
       description       = "Model Independent cosMological constrained Initial Conditions",
       long_description  = long_description,
       long_description_content_type = 'text/markdown',

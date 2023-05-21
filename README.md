@@ -3,7 +3,7 @@
 |               |                                       |
 |---------------|---------------------------------------|
 | Author        | Krishna Naidoo                        |
-| Version       | 1.0.0                                 |
+| Version       | 1.0.1                                 |
 | Repository    | https://github.com/knaidoo29/mimic    |
 | Documentation | https://mimic-doc.readthedocs.io/     |
 
@@ -31,7 +31,6 @@ python setup.py install
 ## Support
 
 If you have any issues with the code or want to suggest ways to improve it please open a new issue ([here](https://github.com/knaidoo29/mimic/issues)) or (if you don't have a github account) email _krishna.naidoo.11@ucl.ac.uk_.
-
 
 ## Version History
 
