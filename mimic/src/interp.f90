@@ -82,7 +82,7 @@ end subroutine interp_log_float
 
 
 subroutine interp_log_array(logx, f, lenlogx, logxarr, lenlogxarr, fmin, fmax, farr)
-  
+
   implicit none
   integer, parameter :: dp = kind(1.d0)
 

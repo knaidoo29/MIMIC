@@ -28,7 +28,7 @@ subroutine get_wf_single_fast(cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez 
     nrx = rx/r
     nry = ry/r
     nrz = rz/r
-    call interp_log_float(logr, zeta, lenzeta, log(r), zeta(1), zeta(lenzeta), cov_du)
+    call interp_log_float(logr, zeta, lenzeta, log10(r), zeta(1), zeta(lenzeta), cov_du)
     du = - adot*cov_du*nrx*cons_ex(i) - adot*cov_du*nry*cons_ey(i) - adot*cov_du*nrz*cons_ez(i)
     val = val + du*eta(i)
   end do

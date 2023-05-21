@@ -4,3 +4,4 @@ mimic.egg-info/*
 tests/*
 tests_F5/*
 *.DS_Store
+*__pycache__

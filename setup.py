@@ -12,10 +12,11 @@ with open(path.join(this_directory, 'README.md')) as f:
 ext1 = Extension(name='mimic.src.interp', sources=['mimic/src/interp.f90'])
 ext2 = Extension(name='mimic.src.progress', sources=['mimic/src/progress.f90'])
 ext3 = Extension(name='mimic.src.fast_eta', sources=['mimic/src/fast_eta.f90'])
-exts = [ext1, ext2, ext3]
+ext4 = Extension(name='mimic.src.fast_eta_grid', sources=['mimic/src/fast_eta_grid.f90'])
+exts = [ext1, ext2, ext3, ext4]
 
 setup(name = 'mimic',
-      version = "0.2.0",
+      version = "0.3.0",
       description       = "Model Independent cosMological constrained Initial Conditions",
       long_description  = long_description,
       long_description_content_type = 'text/markdown',

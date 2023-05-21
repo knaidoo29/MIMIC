@@ -3,7 +3,7 @@ import numpy as np
 
 def read_redshift(zfname, verbose=True):
     """Read redshift file to get redshift values.
-    
+
     Parameters
     ----------
     zfname : str

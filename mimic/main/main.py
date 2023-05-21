@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 import yaml
 
 import fiesta
-import magpie
+#import magpie
 import shift
 
 from .. import randoms
@@ -129,7 +129,6 @@ class MIMIC:
             "GrowthFile": None,
         }
         self.siminfo = {
-            "Simname": None,
             "Boxsize": None,
             "Ngrid": None
         }
@@ -142,7 +141,8 @@ class MIMIC:
             "Sigma_NR": None,
             "Type": None,
             "KeepFrac": 1.,
-            "RZA_Method": 2
+            "RZA_Method": 2,
+            "UseGridCorr": True
         }
         self.outputs = {
             "OutputFolder": None,
@@ -150,6 +150,7 @@ class MIMIC:
         }
         self.ICs = {
             "Seed": None,
+            "WNFile": None,
             "z_ic": None
         }
         self.what2run = {
@@ -292,12 +293,10 @@ class MIMIC:
         self.MPI.mpi_print_zero()
         self.MPI.mpi_print_zero(" Siminfo:")
 
-        self.siminfo["Simname"] = str(params["Siminfo"]["Simname"])
         self.siminfo["Boxsize"] = float(params["Siminfo"]["Boxsize"])
         self.siminfo["Ngrid"] = int(params["Siminfo"]["Ngrid"])
 
         self.MPI.mpi_print_zero()
-        self.MPI.mpi_print_zero(" - Simname \t\t=", self.siminfo["Simname"])
         self.MPI.mpi_print_zero(" - Boxsize \t\t=", self.siminfo["Boxsize"])
         self.MPI.mpi_print_zero(" - Ngrid \t\t=", self.siminfo["Ngrid"])
 
@@ -320,6 +319,10 @@ class MIMIC:
             self.MPI.mpi_print_zero(" - Fname \t\t=", self.constraints["Fname"])
             self.MPI.mpi_print_zero(" - z_eff \t\t=", self.constraints["z_eff"])
             self.MPI.mpi_print_zero(" - Rg \t\t\t=", self.constraints["Rg"])
+            if self.constraints["Rg"] < 0.01*self.siminfo["Boxsize"]/self.siminfo["Ngrid"]:
+                self.constraints["Rg"] = 0.01*self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
+                self.MPI.mpi_print_zero(" -- Rg smaller than pixelisation")
+                self.MPI.mpi_print_zero(" -- Rg changed to equal pixel scale %2f" % self.constraints["Rg"])
             if self.constraints["CorrFile"] is not None:
                 self._check_exist(self.constraints["CorrFile"])
             self.MPI.mpi_print_zero(" - CorrFile \t\t=", self.constraints["CorrFile"])
@@ -363,11 +366,20 @@ class MIMIC:
             self.MPI.mpi_print_zero()
             self.MPI.mpi_print_zero(" ICs:")
 
-            self.ICs["Seed"] = int(params["ICs"]["Seed"])
-            self.ICs["z_ic"] = float(params["ICs"]["z_ic"])
+            if self._check_param_key(params["ICs"], "Seed"):
+                self.ICs["Seed"] = int(params["ICs"]["Seed"])
+                self.MPI.mpi_print_zero()
+                self.MPI.mpi_print_zero(" - Seed \t\t=", self.ICs["Seed"])
+            elif self._check_param_key(params["ICs"], "WNFile"):
+                self.ICs["WNFile"] = str(params["ICs"]["WNFile"])
+                self.MPI.mpi_print_zero()
+                self.MPI.mpi_print_zero(" - WNFile \t\t=", self.ICs["WNFile"])
+            else:
+                self.ERROR = True
+                self.MPI.mpi_print_zero(" ERROR: Must specify either a Seed or WNFile.")
+                self._break4error()
 
-            self.MPI.mpi_print_zero()
-            self.MPI.mpi_print_zero(" - Seed \t\t=", self.ICs["Seed"])
+            self.ICs["z_ic"] = float(params["ICs"]["z_ic"])
             self.MPI.mpi_print_zero(" - z_ic \t\t=", self.ICs["z_ic"])
 
             if self._check_param_key(params["ICs"], "CR"):
@@ -444,6 +456,25 @@ class MIMIC:
             self._get_interp_fz()
             return self.interp_fz(redshift)
 
+    # def get_pk_suppress(self):
+    #     self.get_grid3D()
+    #     r3D = np.sqrt(self.x3D**2. + self.y3D**2. + self.z3D**2.)
+    #     r3D = r3D.flatten()
+    #     redges, rmid = shift.cart.grid1D(np.sqrt(3)*self.siminfo["Boxsize"], int(self.siminfo["Ngrid"]/2))
+    #     pixID = magpie.pixels.pos2pix_cart1d(r3D, np.sqrt(3)*self.siminfo["Boxsize"], int(self.siminfo["Ngrid"]/2), origin=0.)
+    #     dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
+    #     binR = magpie.pixels.bin_pix(pixID, int(self.siminfo["Ngrid"]/2), weights=None)*dx**3
+    #     volR = (4./3.) * np.pi * redges**3
+    #     volR /= 8.
+    #     dvolR = volR[1:] - volR[:-1]
+    #     xi_suppress = binR/dvolR
+    #     cond = np.where(rmid >= self.siminfo["Boxsize"])[0]
+    #     rmid, xi_suppress = rmid[cond], xi_suppress[cond]
+    #     kmid = 2.*np.pi/rmid
+    #     kmid = kmid[::-1]
+    #     pk_suppress = np.copy(xi_suppress[::-1])
+    #     interp_pk_suppress = interp1d(kmid, pk_suppress, bounds_error=False, fill_value=(0.,1.))
+    #     return interp_pk_suppress
 
     def prep_theory(self):
         self.MPI.mpi_print_zero()
@@ -457,7 +488,9 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Create P(k) interpolator")
         self.kmin, self.kmax = self.theory_kh.min(), self.theory_kh.max()
-        self.interp_pk = interp1d(self.theory_kh, self.theory_pk, kind='cubic', bounds_error=False, fill_value=0.)
+        #interp_pk_suppress = self.get_pk_suppress()
+        self.interp_pk = interp1d(self.theory_kh, self.theory_pk,#*interp_pk_suppress(self.theory_kh),
+            kind='cubic', bounds_error=False, fill_value=0.)
 
         self.MPI.mpi_print_zero()
         self.MPI.mpi_print_zero(" - Load GrowthFile :", self.cosmo["GrowthFile"])
@@ -557,9 +590,12 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Compute correlators in parallel")
 
-        self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
-        self.sim_kmax = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
-        self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 500)
+        self.sim_kmin = None#1e-2*shift.cart.get_kf(self.siminfo["Boxsize"])
+        self.sim_kmax = None#1e2*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+
+        self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 100)
+
+        dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
 
         Dz2 = self._get_growth_D(redshift, kmag=self.theory_kh)**2.
         fz0 = self._get_growth_f(redshift, kmag=self.theory_kh)
@@ -567,14 +603,14 @@ class MIMIC:
         _corr_r = self.MPI.split_array(self.corr_r)
         _Rg = self.constraints["Rg"]
 
-        _xi = theory.pk2xi(_corr_r, self.theory_kh, Dz2*self.theory_pk, kmin=self.sim_kmin,
-            kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
-        _zeta = theory.pk2zeta(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin,
-            kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg, cons_type=self.constraints["Type"])
-        _psiR = theory.pk2psiR(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin,
-            kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg, cons_type=self.constraints["Type"])
-        _psiT = theory.pk2psiT(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin,
-            kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg, cons_type=self.constraints["Type"])
+        _xi = theory.pk2xi(_corr_r, self.theory_kh, Dz2*self.theory_pk, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+        _zeta = theory.pk2zeta(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg, cons_type=self.constraints["Type"])
+        _psiR = theory.pk2psiR(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg, cons_type=self.constraints["Type"])
+        _psiT = theory.pk2psiT(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg, cons_type=self.constraints["Type"])
 
         self.MPI.wait()
 
@@ -631,9 +667,15 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Compute vel-vel covariance matrix in parallel")
 
-        cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
-            ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
-            self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
+        if self.constraints["UseGridCorr"]:
+            cov_uu = theory.get_cov_grid_uu(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
+                self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
+                cons_type=self.constraints["Type"])
+        else:
+            cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
+                ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
+                self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
 
         self.MPI.mpi_print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
 
@@ -767,11 +809,20 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Computing Wiener Filter density")
         #dens_WF = np.array([self._get_WF_single(self.x3D[i], self.y3D[i], self.z3D[i], adot, i, len(self.x3D)) for i in range(0, len(self.x3D))])
         prefix = " ---- "
-        dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
-            cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
-            x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log(self.corr_r[1:]),
-            zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
-            mpi_rank=self.MPI.rank)
+        if self.constraints["UseGridCorr"]:
+            _r = np.logspace(-2., np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
+            _zeta = self.interp_zeta(_r)
+            dens_WF = src.get_wf_grid_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
+                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
+                zeta=_zeta, lenzeta=len(_zeta), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+                mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"], ngrid=self.siminfo["Ngrid"])
+        else:
+            dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
+                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(self.corr_r[1:]),
+                zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+                mpi_rank=self.MPI.rank)
 
         self.unflatten_grid3D()
         dens_WF = dens_WF.reshape(self.x_shape)
@@ -981,7 +1032,6 @@ class MIMIC:
 
         fname = self._get_fname_prefix() + 'rza.npz'
         self.MPI.mpi_print_zero(" - Saving RZA constraints to: %s" % fname)
-        self.MPI.mpi_print_zero()
 
         if self.MPI.rank == 0:
             np.savez(fname, x=self.cons_x-self.halfsize, y=self.cons_y-self.halfsize,
@@ -1011,11 +1061,26 @@ class MIMIC:
         kmag = self.get_kgrid_mag()
 
         self.start_FFT(self.siminfo["Ngrid"])
-        seed = self.ICs["Seed"] + self.MPI.rank
 
-        self.MPI.mpi_print_zero(" - Construct white noise field with seed %i" % seed)
-
-        WN = randoms.get_white_noise(seed, *self.x_shape)
+        if self.ICs["Seed"] is not None:
+            seed = self.ICs["Seed"] + self.MPI.rank
+            self.MPI.mpi_print_zero(" - Construct white noise field with seed %i" % seed)
+            WN = randoms.get_white_noise(seed, *self.x_shape)
+        elif self.ICs["WNFile"] is not None:
+            fname = self.ICs["WNFile"]
+            self._check_exist(fname)
+            if self.MPI.rank == 0:
+                data = np.load(fname)
+                WN = data["WN"]
+                if len(WN) != self.siminfo["Ngrid"]:
+                    self.ERROR = True
+                    self.MPI.mpi_print_zero(" ERROR: Ngrid = %i for WN does not match siminfo Ngrid = %i." % (len(WN), self.siminfo["Ngrid"]))
+                    self._break4error()
+                _x3D, _y3D, _z3D = shift.cart.grid3D(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+            else:
+                _x3D, _y3D, _z3D, WN = None, None, None, None
+            self.MPI.wait()
+            WN = self.SBX.distribute_grid3D(_x3D, _y3D, _z3D, WN)
 
         self.save_WN(WN)
 
@@ -1077,9 +1142,15 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Compute vel-vel covariance matrix in parallel")
 
-        cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
-            ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
-            self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
+        if self.constraints["UseGridCorr"]:
+            cov_uu = theory.get_cov_grid_uu(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
+                self.siminfo["Ngrid"], ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
+                self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
+                cons_type=self.constraints["Type"])
+        else:
+            cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
+                ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
+                self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
 
         self.MPI.mpi_print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
 
@@ -1216,17 +1287,34 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Computing Constrained Realisation density")
         #self.dens += np.array([self._get_CR_single(self.x3D[i], self.y3D[i], self.z3D[i], adot, i, len(self.x3D)) for i in range(0, len(self.x3D))])
         prefix = " ---- "
-        self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
-            cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
-            x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log(self.corr_r[1:]),
-            zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
-            mpi_rank=self.MPI.rank)
+        if self.constraints["UseGridCorr"]:
+            _r = np.logspace(-2., np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
+            _zeta = self.interp_zeta(_r)
+            self.dens += src.get_wf_grid_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
+                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
+                zeta=_zeta, lenzeta=len(_r), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+                mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"], ngrid=self.siminfo["Ngrid"])
+        else:
+            self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
+                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(self.corr_r[1:]),
+                zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+                mpi_rank=self.MPI.rank)
 
         self.unflatten_grid3D()
         self.dens = self.dens.reshape(self.x_shape)
 
         self.MPI.mpi_print_zero()
         self.save_dens("CR")
+
+    def get_particle_mass(self):
+        G_const = 6.6743e-11
+        part_mass = 3.*self.cosmo["Omega_m"]*self.siminfo["Boxsize"]**3.
+        part_mass /= 8.*np.pi*G_const*self.siminfo["Ngrid"]**3.
+        part_mass *= 3.0857e2/1.9891
+        part_mass /= 1e10
+        return part_mass
 
 
     def get_IC(self):
@@ -1241,9 +1329,75 @@ class MIMIC:
         else:
             z1 = 0.
 
+        self.MPI.mpi_print_zero(" - Scaling density from redshift %0.2f to %0.2f" % (z1, z0))
         self.dens = self.dens_at_z(self.dens, z0, redshift_current=z1)
 
         self.save_dens("IC")
+
+        self.MPI.mpi_print_zero()
+        self.MPI.mpi_print_zero(" - Computing IC positions and velocities using 1LPT")
+
+        psi_x, psi_y, psi_z = self.dens2psi(self.dens)
+        vel_x, vel_y, vel_z = self.psi2vel(z0, psi_x, psi_y, psi_z)
+
+        pos_x = self.x3D + psi_x
+        pos_y = self.y3D + psi_y
+        pos_z = self.z3D + psi_z
+
+        pos_x = pos_x.flatten()
+        pos_y = pos_y.flatten()
+        pos_z = pos_z.flatten()
+
+        vel_x = vel_x.flatten()
+        vel_y = vel_y.flatten()
+        vel_z = vel_z.flatten()
+
+        part_len = np.array([len(pos_x)])
+        part_lens = self.MPI.collect(part_len)
+
+        if self.MPI.rank == 0:
+            part_id_offsets = np.cumsum(part_lens)
+            self.MPI.send(part_id_offsets, tag=11)
+        else:
+            part_id_offsets = self.MPI.recv(0, tag=11)
+
+        self.MPI.wait()
+
+        part_id_offsets = np.array([0] + np.ndarray.tolist(part_id_offsets))
+
+        part_mass = self.get_particle_mass()
+
+        self.MPI.mpi_print_zero(" - Particle mass = %0.6f" % part_mass)
+        self.MPI.wait()
+
+        header = {
+          'nfiles'        : self.MPI.size,
+          'massarr'       : part_mass,
+          'npart_all'     : self.siminfo["Ngrid"]**3,
+          'time'          : theory.z2a(self.ICs["z_ic"]),
+          'redshift'      : self.ICs["z_ic"],
+          'boxsize'       : self.siminfo["Boxsize"],
+          'omegam'        : self.cosmo["Omega_m"],
+          'omegal'        : 1.-self.cosmo["Omega_m"],
+          'hubble'        : self.cosmo["H0"]*1e-2
+        }
+
+        pos = np.column_stack([pos_x, pos_y, pos_z])
+        vel = np.column_stack([vel_x, vel_y, vel_z])
+
+        # self.MPI.mpi_print(" -- Processor - " + str(self.MPI.rank) + " particle position shape " + str(np.shape(pos)))
+        # self.MPI.mpi_print(" -- Processor - " + str(self.MPI.rank) + " particle velocity shape " + str(np.shape(vel)))
+        # self.MPI.wait()
+
+        #fname = params['Siminfo']['Simname'] + '_IC_'+str(MPI.rank)+'.npz'
+        #np.savez(fname, pos=pos, vel=vel)
+
+        fname = self._get_fname_prefix() + 'IC.%i' % self.MPI.rank
+
+        self.MPI.mpi_print_zero()
+        self.MPI.mpi_print_zero(" - Saving ICs in Gadget format to %s[0-%i]"%(fname[:-1], self.MPI.size-1))
+
+        write.write_gadget(fname, header, pos, vel, ic_format=2, single=True, id_offset=part_id_offsets[self.MPI.rank])
 
 
     def run(self, yaml_fname):
@@ -1303,11 +1457,9 @@ class MIMIC:
         elif time_val < 60:
             self.MPI.mpi_print_zero(prefix, "%7.2f s" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
         elif time_val < 60*60:
-            time_val /= 60
-            self.MPI.mpi_print_zero(prefix, "%7.2f m" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
+            self.MPI.mpi_print_zero(prefix, "%7.2f m" % (time_val/(60.)), " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
         else:
-            time_val /= 60*60
-            self.MPI.mpi_print_zero(prefix, "%7.2f h" % time_val, " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
+            self.MPI.mpi_print_zero(prefix, "%7.2f h" % (time_val/(60.*60.)), " [ %6.2f %% ]" % (100*time_val / (self.time["End"] - self.time["Start"])))
 
 
     def end(self):
