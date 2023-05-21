@@ -9,14 +9,14 @@ from .correlators import pk2psiR
 from .correlators import pk2psiT
 from .correlators import periodic_1D
 from .correlators import periodic_3D
-from .correlators import snap2grid1D
-from .correlators import snap2grid3D
+# from .correlators import snap2grid1D
+# from .correlators import snap2grid3D
 from .correlators import get_cov_dd
 from .correlators import get_cov_du
 from .correlators import get_cov_uu
-from .correlators import get_cov_grid_dd
-from .correlators import get_cov_grid_du
-from .correlators import get_cov_grid_uu
+from .correlators import get_cov_dd_periodic
+from .correlators import get_cov_du_periodic
+from .correlators import get_cov_uu_periodic
 
 from .expansion import get_Hz_LCDM
 

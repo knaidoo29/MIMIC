@@ -1,5 +1,5 @@
 
-subroutine interp_linear_float(x, f, lenx, xval, fillval, fval)
+subroutine interp_lin_float(x, f, lenx, xval, fillval, fval)
 
   implicit none
   integer, parameter :: dp = kind(1.d0)
@@ -27,10 +27,10 @@ subroutine interp_linear_float(x, f, lenx, xval, fillval, fval)
     fval = fillval
   end if
 
-end subroutine interp_linear_float
+end subroutine interp_lin_float
 
 
-subroutine interp_linear_array(x, f, lenx, xarr, lenxarr, fillval, farr)
+subroutine interp_lin_array(x, f, lenx, xarr, lenxarr, fillval, farr)
 
   implicit none
   integer, parameter :: dp = kind(1.d0)
@@ -42,10 +42,10 @@ subroutine interp_linear_array(x, f, lenx, xarr, lenxarr, fillval, farr)
   integer :: i
 
   do i = 1, lenxarr
-    call interp_linear_float(x, f, lenx, xarr(i), fillval, farr(i))
+    call interp_lin_float(x, f, lenx, xarr(i), fillval, farr(i))
   end do
 
-end subroutine interp_linear_array
+end subroutine interp_lin_array
 
 
 subroutine interp_log_float(logx, f, lenlogx, logxval, fmin, fmax, fval)

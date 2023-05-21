@@ -9,9 +9,11 @@ from scipy.interpolate import interp1d
 
 import yaml
 
-import fiesta
-#import magpie
-import shift
+# import fiesta
+# import magpie
+# import shift
+
+from ..ext import fiesta, shift
 
 from .. import randoms
 from .. import src
@@ -136,13 +138,13 @@ class MIMIC:
             "Fname": None,
             "z_eff": None,
             "Rg": None,
-            "CorrFile": None,
-            "CovFile": None,
+            #"CorrFile": None,
+            #"CovFile": None,
             "Sigma_NR": None,
-            "Type": None,
-            "KeepFrac": 1.,
+            "Type": "Vel",
+            #"KeepFrac": None,
             "RZA_Method": 2,
-            "UseGridCorr": True
+            #"UseGridCorr": True
         }
         self.outputs = {
             "OutputFolder": None,
@@ -309,34 +311,36 @@ class MIMIC:
             self.constraints["Fname"] = str(params["Constraints"]["Fname"])
             self.constraints["z_eff"] = float(params["Constraints"]["z_eff"])
             self.constraints["Rg"] = float(params["Constraints"]["Rg"])
-            self.constraints["CorrFile"] = params["Constraints"]["CorrFile"]
-            self.constraints["CovFile"] = params["Constraints"]["CovFile"]
+            #self.constraints["CorrFile"] = params["Constraints"]["CorrFile"]
+            #self.constraints["CovFile"] = params["Constraints"]["CovFile"]
             self.constraints["Sigma_NR"] = float(params["Constraints"]["Sigma_NR"])
-            self.constraints["Type"] = str(params["Constraints"]["Type"])
+            #self.constraints["Type"] = str(params["Constraints"]["Type"])
 
             self.MPI.mpi_print_zero()
             self._check_exist(self.constraints["Fname"])
             self.MPI.mpi_print_zero(" - Fname \t\t=", self.constraints["Fname"])
             self.MPI.mpi_print_zero(" - z_eff \t\t=", self.constraints["z_eff"])
             self.MPI.mpi_print_zero(" - Rg \t\t\t=", self.constraints["Rg"])
-            if self.constraints["Rg"] < 0.01*self.siminfo["Boxsize"]/self.siminfo["Ngrid"]:
-                self.constraints["Rg"] = 0.01*self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
-                self.MPI.mpi_print_zero(" -- Rg smaller than pixelisation")
-                self.MPI.mpi_print_zero(" -- Rg changed to equal pixel scale %2f" % self.constraints["Rg"])
-            if self.constraints["CorrFile"] is not None:
-                self._check_exist(self.constraints["CorrFile"])
-            self.MPI.mpi_print_zero(" - CorrFile \t\t=", self.constraints["CorrFile"])
-            if self.constraints["CovFile"] is not None:
-                self._check_exist(self.constraints["CovFile"])
-            self.MPI.mpi_print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
+            # if self.constraints["Rg"] < 0.01*self.siminfo["Boxsize"]/self.siminfo["Ngrid"]:
+            #     self.constraints["Rg"] = 0.01*self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
+            #     self.MPI.mpi_print_zero(" -- Rg smaller than pixelisation")
+            #     self.MPI.mpi_print_zero(" -- Rg changed to equal pixel scale %2f" % self.constraints["Rg"])
+
+            # if self.constraints["CorrFile"] is not None:
+            #     self._check_exist(self.constraints["CorrFile"])
+            # self.MPI.mpi_print_zero(" - CorrFile \t\t=", self.constraints["CorrFile"])
+            # if self.constraints["CovFile"] is not None:
+            #     self._check_exist(self.constraints["CovFile"])
+            # self.MPI.mpi_print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
+
             self.MPI.mpi_print_zero(" - Sigma_NR \t\t=", self.constraints["Sigma_NR"])
-            self.MPI.mpi_print_zero(" - Type \t\t=", self.constraints["Type"])
+            #self.MPI.mpi_print_zero(" - Type \t\t=", self.constraints["Type"])
 
             # Optional parameter, will only keep constraints with
             # KeepFrac*Halfsize radius from the center
-            if self._check_param_key(params["Constraints"], "KeepFrac"):
-                self.constraints["KeepFrac"] = float(params["Constraints"]["KeepFrac"])
-                self.MPI.mpi_print_zero(" - KeepFrac \t\t=", self.constraints["KeepFrac"])
+            # if self._check_param_key(params["Constraints"], "KeepFrac"):
+            #     self.constraints["KeepFrac"] = float(params["Constraints"]["KeepFrac"])
+            #     self.MPI.mpi_print_zero(" - KeepFrac \t\t=", self.constraints["KeepFrac"])
 
             # Defines RZA Method -- for future use not currently implemented.
             if self._check_param_key(params["Constraints"], "RZA_Method"):
@@ -532,8 +536,11 @@ class MIMIC:
         self.cons_ez /= norm
         # Keep only positions inside the box, r <= halfboxsize
         self.MPI.mpi_print_zero(" -- Remove constrained points outside of the simulation box")
-        r = np.sqrt((self.cons_x-self.halfsize)**2. + (self.cons_y-self.halfsize)**2. + (self.cons_z-self.halfsize)**2.)
-        cond = np.where(r < self.constraints["KeepFrac"]*self.halfsize)[0]
+        #r = np.sqrt((self.cons_x-self.halfsize)**2. + (self.cons_y-self.halfsize)**2. + (self.cons_z-self.halfsize)**2.)
+        #cond = np.where(r < self.constraints["KeepFrac"]*self.halfsize)[0]
+        cond = np.where((self.cons_x >= 0.) & (self.cons_x <= self.siminfo["Boxsize"]) &
+                        (self.cons_y >= 0.) & (self.cons_y <= self.siminfo["Boxsize"]) &
+                        (self.cons_z >= 0.) & (self.cons_z <= self.siminfo["Boxsize"]))[0]
         self.MPI.mpi_print_zero(" -- Retained %i constrained points from %i" % (len(cond), len(self.cons_x)))
         self.cons_x = self.cons_x[cond]
         self.cons_y = self.cons_y[cond]
@@ -667,15 +674,15 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Compute vel-vel covariance matrix in parallel")
 
-        if self.constraints["UseGridCorr"]:
-            cov_uu = theory.get_cov_grid_uu(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
-                self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
-                cons_type=self.constraints["Type"])
-        else:
-            cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
-                ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
-                self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
+        # if self.constraints["UseGridCorr"]:
+        cov_uu = theory.get_cov_uu_periodic(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
+            ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
+            self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
+            cons_type=self.constraints["Type"])
+        # else:
+        #     cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
+        #         ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
+        #         self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
 
         self.MPI.mpi_print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
 
@@ -809,20 +816,20 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Computing Wiener Filter density")
         #dens_WF = np.array([self._get_WF_single(self.x3D[i], self.y3D[i], self.z3D[i], adot, i, len(self.x3D)) for i in range(0, len(self.x3D))])
         prefix = " ---- "
-        if self.constraints["UseGridCorr"]:
-            _r = np.logspace(-2., np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
-            _zeta = self.interp_zeta(_r)
-            dens_WF = src.get_wf_grid_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
-                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
-                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
-                zeta=_zeta, lenzeta=len(_zeta), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
-                mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"], ngrid=self.siminfo["Ngrid"])
-        else:
-            dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
-                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
-                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(self.corr_r[1:]),
-                zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
-                mpi_rank=self.MPI.rank)
+        # if self.constraints["UseGridCorr"]:
+        _r = np.logspace(-2., np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
+        _zeta = self.interp_zeta(_r)
+        dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+            cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
+            x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
+            zeta=_zeta, lenzeta=len(_zeta), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+            mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"])
+        # else:
+        #     dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+        #         cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
+        #         x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(self.corr_r[1:]),
+        #         zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+        #         mpi_rank=self.MPI.rank)
 
         self.unflatten_grid3D()
         dens_WF = dens_WF.reshape(self.x_shape)
@@ -1142,15 +1149,15 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Compute vel-vel covariance matrix in parallel")
 
-        if self.constraints["UseGridCorr"]:
-            cov_uu = theory.get_cov_grid_uu(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
-                self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
-                cons_type=self.constraints["Type"])
-        else:
-            cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
-                ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
-                self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
+        # if self.constraints["UseGridCorr"]:
+        cov_uu = theory.get_cov_uu_periodic(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
+            ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
+            self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
+            cons_type=self.constraints["Type"])
+        # else:
+        #     cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
+        #         ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
+        #         self.interp_Hz, psiT0, cons_type=self.constraints["Type"])
 
         self.MPI.mpi_print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
 
@@ -1287,20 +1294,20 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Computing Constrained Realisation density")
         #self.dens += np.array([self._get_CR_single(self.x3D[i], self.y3D[i], self.z3D[i], adot, i, len(self.x3D)) for i in range(0, len(self.x3D))])
         prefix = " ---- "
-        if self.constraints["UseGridCorr"]:
-            _r = np.logspace(-2., np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
-            _zeta = self.interp_zeta(_r)
-            self.dens += src.get_wf_grid_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
-                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
-                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
-                zeta=_zeta, lenzeta=len(_r), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
-                mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"], ngrid=self.siminfo["Ngrid"])
-        else:
-            self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
-                cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
-                x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(self.corr_r[1:]),
-                zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
-                mpi_rank=self.MPI.rank)
+        # if self.constraints["UseGridCorr"]:
+        _r = np.logspace(-2., np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
+        _zeta = self.interp_zeta(_r)
+        self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+            cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
+            x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
+            zeta=_zeta, lenzeta=len(_r), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+            mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"])
+        # else:
+        #     self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
+        #         cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
+        #         x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(self.corr_r[1:]),
+        #         zeta=self.corr_zeta[1:], lenzeta=len(self.corr_r[1:]), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+        #         mpi_rank=self.MPI.rank)
 
         self.unflatten_grid3D()
         self.dens = self.dens.reshape(self.x_shape)
