@@ -1,6 +1,6 @@
 import numpy as np
 
-import shift
+from ... import shift
 
 from . import points
 from .. import src

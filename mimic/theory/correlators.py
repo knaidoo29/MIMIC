@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 from scipy.integrate import simps
 from scipy.special import spherical_jn
-from magpie.utils import isscalar
+#from magpie.utils import isscalar
 
 
 def get_sinc(x):
@@ -13,7 +13,7 @@ def get_sinc(x):
     x : float/array
         Values to return sinc function.
     """
-    if isscalar(x) == True:
+    if np.isscalar(x) == True:
         if x == 0:
             sinc = 0.
         else:
@@ -127,7 +127,7 @@ def pk2zeta(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100,
         p = interp_PK(k)
         if cons_type == "Vel":
             if fk is not None:
-                if isscalar(fk):
+                if np.isscalar(fk):
                     f = fk
                 else:
                     assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
@@ -195,7 +195,7 @@ def pk2psiR(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100,
         p = interp_PK(k)
         if cons_type == "Vel":
             if fk is not None:
-                if isscalar(fk):
+                if np.isscalar(fk):
                     f = fk
                 else:
                     assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
@@ -263,7 +263,7 @@ def pk2psiT(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100,
         p = interp_PK(k)
         if cons_type == "Vel":
             if fk is not None:
-                if isscalar(fk):
+                if np.isscalar(fk):
                     f = fk
                 else:
                     assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
