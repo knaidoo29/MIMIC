@@ -1,7 +1,7 @@
 import sys
 
 import mimic
-from mimic.ext import mpiutils
+import mpiutils
 
 MPI = mpiutils.MPI()
 
