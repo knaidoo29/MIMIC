@@ -74,7 +74,7 @@ end subroutine get_wf_single_fast
 
 
 subroutine get_wf_fast(cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez &
-  , cons_len, eta, x, y, z, lenx, adot, logr, zeta, lenzeta, prefix, lenpre&
+  , cons_len, eta, x, y, z, lenx, adot, logr, zeta, lenzeta, prefix, lenpre &
   , lenpro, mpi_rank, boxsize, values)
 
   implicit none
