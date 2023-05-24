@@ -822,7 +822,7 @@ class MIMIC:
         dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
             cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
             x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
-            zeta=_zeta, lenzeta=len(_zeta), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+            zeta=_zeta, lenzeta=len(_zeta), #prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
             mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"])
         # else:
         #     dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
@@ -1310,7 +1310,7 @@ class MIMIC:
         self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
             cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
             x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
-            zeta=_zeta, lenzeta=len(_r), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+            zeta=_zeta, lenzeta=len(_r), #prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
             mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"])
         # else:
         #     self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
