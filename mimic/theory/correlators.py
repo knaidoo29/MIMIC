@@ -5,6 +5,20 @@ from scipy.special import spherical_jn
 #from magpie.utils import isscalar
 
 
+def isscalar(x):
+    """More general isscalar function to prevent 0 dimensional numpy arrays
+    from being misidentified as arrays even though they are actually scalar
+    variables.
+    """
+    if type(x).__module__ == np.__name__:
+        if len(x.shape) == 0:
+            return True
+        else:
+            return False
+    else:
+        return np.isscalar(x)
+
+
 def get_sinc(x):
     """Returns the sinc function sin(x)/x
 
@@ -13,7 +27,7 @@ def get_sinc(x):
     x : float/array
         Values to return sinc function.
     """
-    if np.isscalar(x) == True:
+    if isscalar(x) == True:
         if x == 0:
             sinc = 0.
         else:
@@ -127,7 +141,7 @@ def pk2zeta(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100,
         p = interp_PK(k)
         if cons_type == "Vel":
             if fk is not None:
-                if np.isscalar(fk):
+                if isscalar(fk):
                     f = fk
                 else:
                     assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
@@ -195,7 +209,7 @@ def pk2psiR(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100,
         p = interp_PK(k)
         if cons_type == "Vel":
             if fk is not None:
-                if np.isscalar(fk):
+                if isscalar(fk):
                     f = fk
                 else:
                     assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
@@ -263,7 +277,7 @@ def pk2psiT(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100,
         p = interp_PK(k)
         if cons_type == "Vel":
             if fk is not None:
-                if np.isscalar(fk):
+                if isscalar(fk):
                     f = fk
                 else:
                     assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
