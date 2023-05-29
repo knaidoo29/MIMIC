@@ -3,70 +3,12 @@ import sys
 import time
 
 import numpy as np
-import matplotlib.pylab as plt
 
 from scipy.interpolate import interp1d
 
-import yaml
-
-# import fiesta
-# import magpie
-# import shift
-
 from ..ext import fiesta, shift
 
-from .. import randoms
-from .. import src
-from .. import theory
-from .. import utils
-from .. import write
-
-
-def check_exist(fname):
-    """Checks arameter file exist.
-
-    Parameters
-    ----------
-    fname : str
-        Yaml parameter filename.
-    """
-    return os.path.exists(fname)
-
-
-def read_paramfile(yaml_fname, MPI):
-    """Read yaml parameter file.
-
-    Parameters
-    ----------
-    yaml_fname : str
-        Yaml parameter filename.
-    MPI : object
-        mpi4py object.
-
-    Returns
-    -------
-    params : dict
-        Parameter file dictionary.
-    ERROR : bool
-        Error tracker.
-    """
-    MPI.mpi_print_zero(" Reading parameter file: "+yaml_fname)
-    if check_exist(yaml_fname) is False:
-        MPI.mpi_print_zero(" ERROR: Yaml file does not exist, aborting.")
-        ERROR = True
-    else:
-        ERROR = False
-    if ERROR is False:
-        if MPI.rank == 0:
-            with open(yaml_fname, mode="r") as file:
-                params = yaml.safe_load(file)
-            MPI.send(params, to_rank=None, tag=11)
-        else:
-            params = MPI.recv(0, tag=11)
-        MPI.wait()
-        return params, ERROR
-    else:
-        return 0, ERROR
+from .. import field, io, src, theory
 
 
 mimic_beg = """
@@ -222,16 +164,14 @@ class MIMIC:
 
 
     def _break4error(self):
-        """Breaks the class run if an error is detected."""
-        if self.ERROR is True:
-            exit()
+        io._break4error(self.ERROR)
 
 
     def _get_fname_prefix(self):
         self.fname_prefix = self.outputs["OutputFolder"]
         if self.MPI.rank == 0:
-            if write.check_folder_exist(self.fname_prefix) == False:
-                write.create_folder(self.fname_prefix)
+            if io.isfolder(self.fname_prefix) == False:
+                io.create_folder(self.fname_prefix)
         if self.fname_prefix[-1] != "/":
             self.fname_prefix += "/"
         self.fname_prefix += self.outputs["Prefix"]
@@ -248,17 +188,10 @@ class MIMIC:
 
 
     def _check_exist(self, fname):
-        if check_exist(fname) is False:
-            self.MPI.mpi_print_zero(" ERROR: File '"+fname+"' does not exist, aborting.")
+        if io.isfile(fname) is False:
             self.ERROR = True
+        io._error_message(self.ERROR, "File %s does not exist" % fname, MPI=self.MPI)
         self._break4error()
-
-
-    def _bool2yesno(self, _x):
-        if _x is True:
-            return "Yes"
-        else:
-            return "No"
 
 
     def read_params(self, params):
@@ -361,8 +294,8 @@ class MIMIC:
             if self.what2run["RZA"]:
                 self.what2run["WF"] = True
 
-            self.MPI.mpi_print_zero(" - WF \t\t\t=", self._bool2yesno(self.what2run["WF"]))
-            self.MPI.mpi_print_zero(" - RZA \t\t\t=", self._bool2yesno(self.what2run["RZA"]))
+            self.MPI.mpi_print_zero(" - WF \t\t\t=", io.bool2yesno(self.what2run["WF"]))
+            self.MPI.mpi_print_zero(" - RZA \t\t\t=", io.bool2yesno(self.what2run["RZA"]))
 
         # ICs
         if self._check_param_key(params, "ICs"):
@@ -393,8 +326,8 @@ class MIMIC:
 
             self.what2run["IC"] = True
 
-            self.MPI.mpi_print_zero(" - CR \t\t\t=", self._bool2yesno(self.what2run["CR"]))
-            self.MPI.mpi_print_zero(" - IC \t\t\t=", self._bool2yesno(self.what2run["IC"]))
+            self.MPI.mpi_print_zero(" - CR \t\t\t=", io.bool2yesno(self.what2run["CR"]))
+            self.MPI.mpi_print_zero(" - IC \t\t\t=", io.bool2yesno(self.what2run["IC"]))
 
         else:
             self.what2run["IC"] = False
@@ -413,72 +346,32 @@ class MIMIC:
 
     def read_paramfile(self, yaml_fname):
         """Reads parameter file."""
-        self.params, self.ERROR = read_paramfile(yaml_fname, self.MPI)
-        if self.ERROR is False:
-             self.read_params(self.params)
+        self.params, self.ERROR = io.read_paramfile(yaml_fname, MPI=self.MPI)
+        self._break4error()
+        self.read_params(self.params)
         self._break4error()
 
 
-    def _get_interp_Dk(self, redshift):
-        growth_Dk = np.zeros(len(self.growth_kh))
-        for i in range(0, len(self.growth_kh)):
-            interp_D = interp1d(self.growth_z, self.growth_Dzk[:, i], kind='cubic')
-            growth_Dk[i] = interp_D(redshift)
-        self.interp_Dk = interp1d(self.growth_kh, growth_Dk, kind='cubic', bounds_error=False)
-
-
-    def _get_interp_Dz(self):
-        self.interp_Dz = interp1d(self.growth_z, self.growth_Dz, kind='cubic')
-
-
     def _get_growth_D(self, redshift, kmag=None):
+        """Returns the linear growth function from tabulated scale dependent and
+        independent linear growth functions."""
         if self.cosmo["ScaleDepGrowth"]:
-            self._get_growth_Dk(redshift)
-            return self.interp_Dk(kmag)
+            return theory.get_growth_D(redshift, self.growth_z, self.growth_Dzk,
+                kval=kmag, karray=self.growth_kh)
         else:
-            self._get_interp_Dz()
-            return self.interp_Dz(redshift)
-
-
-    def _get_interp_fk(self, redshift):
-        growth_fk = np.zeros(len(self.growth_kh))
-        for i in range(0, len(self.growth_kh)):
-            interp_f = interp1d(self.growth_z, self.growth_fzk[:, i], kind='cubic')
-            growth_fk[i] = interp_f(redshift)
-        self.interp_fk = interp1d(self.growth_kh, growth_fk, kind='cubic', bounds_error=False)
-
-
-    def _get_interp_fz(self):
-        self.interp_fz = interp1d(self.growth_z, self.growth_fz, kind='cubic')
+            return theory.get_growth_D(redshift, self.growth_z, self.growth_Dz)
 
 
     def _get_growth_f(self, redshift, kmag=None):
+        """Returns the linear growth rate from tabulated scale dependent and
+        independent linear growth rate."""
         if self.cosmo["ScaleDepGrowth"]:
-            self._get_growth_fk(redshift)
-            return self.interp_fk(kmag)
+            return theory.get_growth_f(redshift, self.growth_z, self.growth_fzk,
+                kval=kmag, karray=self.growth_kh)
         else:
-            self._get_interp_fz()
-            return self.interp_fz(redshift)
+            return theory.get_growth_f(redshift, self.growth_z, self.growth_fz)
 
-    # def get_pk_suppress(self):
-    #     self.get_grid3D()
-    #     r3D = np.sqrt(self.x3D**2. + self.y3D**2. + self.z3D**2.)
-    #     r3D = r3D.flatten()
-    #     redges, rmid = shift.cart.grid1D(np.sqrt(3)*self.siminfo["Boxsize"], int(self.siminfo["Ngrid"]/2))
-    #     pixID = magpie.pixels.pos2pix_cart1d(r3D, np.sqrt(3)*self.siminfo["Boxsize"], int(self.siminfo["Ngrid"]/2), origin=0.)
-    #     dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
-    #     binR = magpie.pixels.bin_pix(pixID, int(self.siminfo["Ngrid"]/2), weights=None)*dx**3
-    #     volR = (4./3.) * np.pi * redges**3
-    #     volR /= 8.
-    #     dvolR = volR[1:] - volR[:-1]
-    #     xi_suppress = binR/dvolR
-    #     cond = np.where(rmid >= self.siminfo["Boxsize"])[0]
-    #     rmid, xi_suppress = rmid[cond], xi_suppress[cond]
-    #     kmid = 2.*np.pi/rmid
-    #     kmid = kmid[::-1]
-    #     pk_suppress = np.copy(xi_suppress[::-1])
-    #     interp_pk_suppress = interp1d(kmid, pk_suppress, bounds_error=False, fill_value=(0.,1.))
-    #     return interp_pk_suppress
+
 
     def prep_theory(self):
         self.MPI.mpi_print_zero()
@@ -492,9 +385,8 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Create P(k) interpolator")
         self.kmin, self.kmax = self.theory_kh.min(), self.theory_kh.max()
-        #interp_pk_suppress = self.get_pk_suppress()
-        self.interp_pk = interp1d(self.theory_kh, self.theory_pk,#*interp_pk_suppress(self.theory_kh),
-            kind='cubic', bounds_error=False, fill_value=0.)
+        self.interp_pk = interp1d(self.theory_kh, self.theory_pk, kind='cubic',
+            bounds_error=False, fill_value=0.)
 
         self.MPI.mpi_print_zero()
         self.MPI.mpi_print_zero(" - Load GrowthFile :", self.cosmo["GrowthFile"])
@@ -536,8 +428,6 @@ class MIMIC:
         self.cons_ez /= norm
         # Keep only positions inside the box, r <= halfboxsize
         self.MPI.mpi_print_zero(" -- Remove constrained points outside of the simulation box")
-        #r = np.sqrt((self.cons_x-self.halfsize)**2. + (self.cons_y-self.halfsize)**2. + (self.cons_z-self.halfsize)**2.)
-        #cond = np.where(r < self.constraints["KeepFrac"]*self.halfsize)[0]
         cond = np.where((self.cons_x >= 0.) & (self.cons_x <= self.siminfo["Boxsize"]) &
                         (self.cons_y >= 0.) & (self.cons_y <= self.siminfo["Boxsize"]) &
                         (self.cons_z >= 0.) & (self.cons_z <= self.siminfo["Boxsize"]))[0]
@@ -597,8 +487,8 @@ class MIMIC:
 
         self.MPI.mpi_print_zero(" - Compute correlators in parallel")
 
-        self.sim_kmin = None#1e-2*shift.cart.get_kf(self.siminfo["Boxsize"])
-        self.sim_kmax = None#1e2*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+        self.sim_kmin = None
+        self.sim_kmax = None
 
         self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 100)
 
@@ -653,9 +543,6 @@ class MIMIC:
         self.save_correlators()
 
 
-    def _debug_cons(self):
-        self.MPI.mpi_print('**', self.MPI.rank, np.shape(self.cons_x))
-
     def compute_eta(self):
         self.MPI.mpi_print_zero()
         self.MPI.mpi_print_zero(" Compute eta-vector")
@@ -675,10 +562,9 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Compute vel-vel covariance matrix in parallel")
 
         # if self.constraints["UseGridCorr"]:
-        cov_uu = theory.get_cov_uu_periodic(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
-            ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
-            self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
-            cons_type=self.constraints["Type"])
+        cov_uu = theory.get_corr_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+            self.interp_psiR, self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
+            cons_type=self.constraints["Type"], boxsize=self.siminfo["Boxsize"], velocity=True)
         # else:
         #     cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
         #         ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
@@ -768,7 +654,7 @@ class MIMIC:
     def _MPI_save_xyz(self, suffix="XYZ"):
         fname_prefix = self._get_fname_prefix()
         fname = fname_prefix + suffix + "_" + str(self.MPI.rank) + ".npz"
-        if check_exist(fname) is False:
+        if self._check_exist(fname) is False:
             check = True
         else:
             data = np.load(fname)
@@ -822,7 +708,7 @@ class MIMIC:
         dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
             cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta,
             x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
-            zeta=_zeta, lenzeta=len(_zeta), #prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+            zeta=_zeta, lenzeta=len(_zeta), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
             mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"])
         # else:
         #     dens_WF = src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
@@ -1082,7 +968,7 @@ class MIMIC:
         if self.ICs["Seed"] is not None:
             seed = self.ICs["Seed"] + self.MPI.rank
             self.MPI.mpi_print_zero(" - Construct white noise field with seed %i" % seed)
-            WN = randoms.get_white_noise(seed, *self.x_shape)
+            WN = field.get_white_noise(seed, *self.x_shape)
         elif self.ICs["WNFile"] is not None:
             fname = self.ICs["WNFile"]
             self._check_exist(fname)
@@ -1109,7 +995,7 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Colour white noise field to get density field")
 
         dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
-        dens_RR_k = randoms.color_white_noise(WN_k, dx, kmag, self.interp_pk, mode='3D')
+        dens_RR_k = field.color_white_noise(WN_k, dx, kmag, self.interp_pk, mode='3D')
 
         self.MPI.mpi_print_zero(" - iFFT density field")
 
@@ -1160,10 +1046,9 @@ class MIMIC:
         self.MPI.mpi_print_zero(" - Compute vel-vel covariance matrix in parallel")
 
         # if self.constraints["UseGridCorr"]:
-        cov_uu = theory.get_cov_uu_periodic(x1, x2, y1, y2, z1, z2, self.siminfo["Boxsize"],
-            ex1, ex2, ey1, ey2, ez1, ez2, self.interp_psiR,
-            self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
-            cons_type=self.constraints["Type"])
+        cov_uu = theory.get_corr_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+            self.interp_psiR, self.interp_psiT, self.constraints["z_eff"], self.interp_Hz, psiT0,
+            cons_type=self.constraints["Type"], boxsize=self.siminfo["Boxsize"], velocity=True)
         # else:
         #     cov_uu = theory.get_cov_uu(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2,
         #         ez1, ez2, self.interp_psiR, self.interp_psiT, self.constraints["z_eff"],
@@ -1310,7 +1195,7 @@ class MIMIC:
         self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
             cons_ex=self.cons_ex, cons_ey=self.cons_ey, cons_ez=self.cons_ez, cons_len=len(self.cons_x), eta=self.eta_CR,
             x=self.x3D, y=self.y3D, z=self.z3D, lenx=len(self.x3D), adot=adot, logr=np.log10(_r),
-            zeta=_zeta, lenzeta=len(_r), #prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
+            zeta=_zeta, lenzeta=len(_r), prefix=prefix, lenpre=len(prefix), lenpro=self._lenpro+2,
             mpi_rank=self.MPI.rank, boxsize=self.siminfo["Boxsize"])
         # else:
         #     self.dens += src.get_wf_fast(cons_x=self.cons_x, cons_y=self.cons_y, cons_z=self.cons_z,
@@ -1414,7 +1299,7 @@ class MIMIC:
         self.MPI.mpi_print_zero()
         self.MPI.mpi_print_zero(" - Saving ICs in Gadget format to %s[0-%i]"%(fname[:-1], self.MPI.size-1))
 
-        write.write_gadget(fname, header, pos, vel, ic_format=2, single=True, id_offset=part_id_offsets[self.MPI.rank])
+        io.save_gadget(fname, header, pos, vel, ic_format=2, single=True, id_offset=part_id_offsets[self.MPI.rank])
 
 
     def run(self, yaml_fname):

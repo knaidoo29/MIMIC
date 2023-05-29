@@ -1,6 +1,15 @@
 import numpy as np
 
-from . import basics
+
+def z2a(z):
+    """Redshift to scale factor."""
+    return 1./(1.+z)
+
+
+def a2z(a):
+    """Scale factor to redshift."""
+    return (1./a) - 1.
+
 
 
 class BackgroundCosmology:
@@ -381,6 +390,6 @@ def get_Hz_LCDM(redshift, H0, Omega_cdm0, Omega_b0=0., mnu=0., Neff=3.046,
         BC.set_baryons(Omega_b0)
     BC.set_cdm(Omega_cdm0)
     BC.set_Lambda()
-    a = basics.z2a(redshift)
+    a = z2a(redshift)
     Hz = BC.get_H(a)
     return Hz

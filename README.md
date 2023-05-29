@@ -3,7 +3,7 @@
 |               |                                       |
 |---------------|---------------------------------------|
 | Author        | Krishna Naidoo                        |
-| Version       | 1.0.1                                 |
+| Version       | 1.1.0                                 |
 | Repository    | https://github.com/knaidoo29/mimic    |
 | Documentation | https://mimic-doc.readthedocs.io/     |
 

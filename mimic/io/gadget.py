@@ -2,7 +2,7 @@ import struct
 import numpy as np
 
 
-def write_gadget(outfile, header, pos, vel, ic_format=2, single=False, id_offset=0):
+def save_gadget(outfile, header, pos, vel, ic_format=2, single=False, id_offset=0):
     """Write binary initial condition (ICs) files for GADGET and AREPO for dark
     matter only simulations.
 

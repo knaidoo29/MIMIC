@@ -74,31 +74,29 @@ end subroutine get_wf_single_fast
 
 
 subroutine get_wf_fast(cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez &
-  , cons_len, eta, x, y, z, lenx, adot, logr, zeta, lenzeta &
+  , cons_len, eta, x, y, z, lenx, adot, logr, zeta, lenzeta, lenpro, prefix, lenpre &
   , mpi_rank, boxsize, values)
-
-  ! lenpro, prefix, lenpre &
 
   implicit none
   integer, parameter :: dp = kind(1.d0)
 
-  integer, intent(in) :: cons_len, lenzeta, lenx, mpi_rank!, lenpro, mpi_rank!, lenpre
+  integer, intent(in) :: cons_len, lenzeta, lenx, lenpro, mpi_rank, lenpre
   real(kind=dp), intent(in) :: x(lenx), y(lenx), z(lenx), adot
   real(kind=dp), intent(in) :: cons_x(cons_len), cons_y(cons_len), cons_z(cons_len)
   real(kind=dp), intent(in) :: cons_ex(cons_len), cons_ey(cons_len), cons_ez(cons_len)
   real(kind=dp), intent(in) :: eta(cons_len)
   real(kind=dp), intent(in) :: logr(lenzeta), zeta(lenzeta), boxsize
-  !character, intent(in) :: prefix(lenpre)
+  character, intent(in) :: prefix(lenpre)
   real(kind=dp), intent(out) :: values(lenx)
 
   integer :: i
-
+  
   do i = 1, lenx
     call get_wf_single_fast(cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez &
       , cons_len, eta, x(i), y(i), z(i), adot, logr, zeta, lenzeta, boxsize, values(i))
-    ! if (mpi_rank .eq. 0) then
-    !   call progress_bar(i, lenx, lenpro, prefix, lenpre)
-    ! end if
+    if (mpi_rank .eq. 0) then
+      call progress_bar(i, lenx, lenpro, prefix, lenpre)
+    end if
   end do
 
 end subroutine get_wf_fast
