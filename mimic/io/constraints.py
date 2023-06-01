@@ -17,24 +17,26 @@ def _load_constraints_ice(fname):
         Location of constraints.
     ex, ey, ez : array
         Vector showing the direction of the velocity.
-    u, u_err : array
+    c, c_err : array
         Velocity and associated error.
+    c_type : array
+        Constraint type: 0 - delta, 1 - phi, 2 - vel.
     """
     # Sanity checks
-    ERROR = check.isfile(fname)
+    ERROR = error._error_if_false(check.isfile(fname))
     error._error_message(ERROR, "File %s does not exist"%fname)
     error._break4error(ERROR)
     # Load data file
     data = np.loadtxt(fname, unpack=True)
-    cons_type = data[0]
+    c_type = data[0]-1
     x, y, z = data[1], data[2], data[3]
-    u, u_err = data[4], data[5]
+    c, c_err = data[4], data[5]
     ex, ey, ez = data[6], data[7], data[8],
     RG = data[9]
-    return x, y, z, ex, ey, ez, u, u_err
+    return x, y, z, ex, ey, ez, c, c_err, c_type
 
 
-def _save_constraints_ice(fname, x, y, z, ex, ey, ez, u, u_err):
+def _save_constraints_ice(fname, x, y, z, ex, ey, ez, c, c_err, c_type):
     """Saves an ICeCoRe constraint file.
 
     Parameters
@@ -45,10 +47,12 @@ def _save_constraints_ice(fname, x, y, z, ex, ey, ez, u, u_err):
         Location of constraints.
     ex, ey, ez : array
         Vector showing the direction of the velocity.
-    u, u_err : array
+    c, c_err : array
         Velocity and associated error.
+    c_type : array
+        Constraint type: 0 - delta, 1 - phi, 2 - vel.
     """
-    cons_type = np.ones(len(x))*2
+    cons_type = np.copy(c_type) + 1
     cons_type = cons_type.astype('int')
     RG = np.zeros(len(x))
     data = np.column_stack([cons_type, x, y, z, u, u_err, ex, ey, ez, RG])
@@ -69,23 +73,25 @@ def _load_constraints_npz(fname):
         Location of constraints.
     ex, ey, ez : array
         Vector showing the direction of the velocity.
-    u, u_err : array
+    c, c_err : array
         Velocity and associated error.
+    c_type : array
+        Constraint type: 0 - delta, 1 - phi, 2 - vel.
     """
     if fname[-4:] != '.npz':
         fname += '.npz'
     # Sanity checks
-    ERROR = check.isfile(fname)
+    ERROR = error._error_if_false(check.isfile(fname))
     error._error_message(ERROR, "File %s does not exist"%fname)
     error._break4error(ERROR)
     data = np.load(fname)
     x, y, z = data['x'], data['y'], data['z']
     ex, ey, ez = data['ex'], data['ey'], data['ez']
-    u, u_err = data['u'], data['u_err']
-    return x, y, z, ex, ey, ez, u, u_err
+    c, c_err, c_type = data['c'], data['c_err'], data['c_type'].astype('int')
+    return x, y, z, ex, ey, ez, c, c_err, c_type
 
 
-def _save_constraints_npz(fname, x, y, z, ex, ey, ez, u, u_err):
+def _save_constraints_npz(fname, x, y, z, ex, ey, ez, c, c_err, c_type):
     """Writes constraints in the npz format for input into MIMIC.
 
     Parameters
@@ -96,15 +102,17 @@ def _save_constraints_npz(fname, x, y, z, ex, ey, ez, u, u_err):
         Location of constraints.
     ex, ey, ez : array
         Vector showing the direction of the velocity.
-    u, u_err : array
-        Velocity and associated error.
+    c, c_err : array
+        Constraints and associated error.
+    c_type : array
+        Constraint type: 0 - delta, 1 - phi, 2 - vel.
     """
     if fname[-4:] != '.npz':
         fname += '.npz'
-    np.savez(fname, x=x, y=y, z=z, ex=ex, ey=ey, ez=ez, u=u, u_err=u_err)
+    np.savez(fname, x=x, y=y, z=z, ex=ex, ey=ey, ez=ez, c=c, c_err=c_err, c_type=c_type)
 
 
-def load_constraints(fname, x, y, z, ex, ey, ez, u, u_err, filetype='npz'):
+def load_constraints(fname, filetype='npz'):
     """Writes constraints file in either npz or ICeCoRe format.
 
     Parameters
@@ -115,24 +123,26 @@ def load_constraints(fname, x, y, z, ex, ey, ez, u, u_err, filetype='npz'):
         Location of constraints.
     ex, ey, ez : array
         Vector showing the direction of the velocity.
-    u, u_err : array
+    c, c_err : array
         Velocity and associated error.
+    c_type : array
+        Constraint type: 0 - delta, 1 - phi, 2 - vel.
     filetype : str, optional
         - 'npz' for numpy binary format.
         - 'ice' for ICeCoRe format.
     """
     # Sanity checks
-    ERROR = error._error_if_false(check.check_is_scalar(ftype))
-    error._error_message(ERROR, 'ftype cannot be an array')
+    ERROR = error._error_if_false(check.isscalar(filetype))
+    error._error_message(ERROR, 'filetype cannot be an array')
     error._break4error(ERROR)
     # Load file
     if filetype == 'npz':
         return _load_constraints_npz(fname)
     elif filetype == 'ice':
-        return _load_save_constraints_ice(fname)
+        return _load_constraints_ice(fname)
 
 
-def save_constraints(fname, x, y, z, ex, ey, ez, u, u_err, filetype='npz'):
+def save_constraints(fname, x, y, z, ex, ey, ez, c, c_err, c_type, filetype='npz'):
     """Writes constraints file in either npz or ICeCoRe format.
 
     Parameters
@@ -143,18 +153,20 @@ def save_constraints(fname, x, y, z, ex, ey, ez, u, u_err, filetype='npz'):
         Location of constraints.
     ex, ey, ez : array
         Vector showing the direction of the velocity.
-    u, u_err : array
+    c, c_err : array
         Velocity and associated error.
+    c_type : array
+        Constraint type: 0 - delta, 1 - phi, 2 - vel.
     filetype : str, optional
         - 'npz' for numpy binary format.
         - 'ice' for ICeCoRe format.
     """
     # Sanity checks
-    ERROR = error._error_if_false(check.check_is_scalar(ftype))
-    error._error_message(ERROR, 'ftype cannot be an array')
+    ERROR = error._error_if_false(check.isscalar(filetype))
+    error._error_message(ERROR, 'filetype cannot be an array')
     error._break4error(ERROR)
     # Load file
     if filetype == 'npz':
-        _save_constraints_npz(fname, x, y, z, ex, ey, ez, u, u_err)
+        _save_constraints_npz(fname, x, y, z, ex, ey, ez, c, c_err, c_type)
     elif filetype == 'ice':
-        _save_constraints_ice(fname, x, y, z, ex, ey, ez, u, u_err)
+        _save_constraints_ice(fname, x, y, z, ex, ey, ez, c, c_err, c_type)

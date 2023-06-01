@@ -84,8 +84,6 @@ def pk2zeta(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
         Min and max kbins for the interpolated pk
     Rg : float, optional
         Gaussian smoothing scale.
-    cons_type : str
-        Velocity or displacement field constraints.
 
     Returns
     -------
@@ -108,17 +106,14 @@ def pk2zeta(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
             kbins = kbinsmax
         k = np.linspace(kmin, kmax, kbins)
         p = interp_PK(k)
-        if cons_type == "Vel":
-            if fk is not None:
-                if isscalar(fk):
-                    f = fk
-                else:
-                    assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
-                    interp_fk = interp1d(kh, fk, kind='cubic')
-                    f = interp_fk(k)
+        if fk is not None:
+            if isscalar(fk):
+                f = fk
             else:
-                f = 1.
-        elif cons_type == "Psi":
+                assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
+                interp_fk = interp1d(kh, fk, kind='cubic')
+                f = interp_fk(k)
+        else:
             f = 1.
         if Rg is None:
             zeta[i] = (1./(2.*np.pi**2.))*simps(f*k*p*spherical_jn(1, k*r[i]), k)
@@ -153,8 +148,6 @@ def pk2psiR(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
         Min and max kbins for the interpolated pk
     Rg : float, optional
         Gaussian smoothing scale.
-    cons_type : str
-        Velocity or displacement field constraints.
 
     Returns
     -------
@@ -176,17 +169,14 @@ def pk2psiR(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
             kbins = kbinsmax
         k = np.linspace(kmin, kmax, kbins)
         p = interp_PK(k)
-        if cons_type == "Vel":
-            if fk is not None:
-                if isscalar(fk):
-                    f = fk
-                else:
-                    assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
-                    interp_fk = interp1d(kh, fk, kind='cubic')
-                    f = interp_fk(k)
+        if fk is not None:
+            if isscalar(fk):
+                f = fk
             else:
-                f = 1.
-        elif cons_type == "Psi":
+                assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
+                interp_fk = interp1d(kh, fk, kind='cubic')
+                f = interp_fk(k)
+        else:
             f = 1.
         if Rg is None:
             psiR[i] = (1./(2.*np.pi**2.))*simps(f*f*p*(spherical_jn(0, k*r[i]) - 2*spherical_jn(1, k*r[i])/(k*r[i])), k)
@@ -197,7 +187,7 @@ def pk2psiR(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
 
 
 def pk2psiT(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000,
-    kbinsmax=100000, Rg=None, cons_type="Vel"):
+    kbinsmax=100000, Rg=None):
     """Power spectrum to 2-point transverse velocity-velocity correlation function psiT(r).
 
     Parameters
@@ -221,8 +211,6 @@ def pk2psiT(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
         Min and max kbins for the interpolated pk
     Rg : float, optional
         Gaussian smoothing scale.
-    cons_type : str
-        Velocity or displacement field constraints.
 
     Returns
     -------
@@ -244,17 +232,14 @@ def pk2psiT(r, kh, pk, fk=None, kmin=None, kmax=None, kfactor=100, kbinsmin=1000
             kbins = kbinsmax
         k = np.linspace(kmin, kmax, kbins)
         p = interp_PK(k)
-        if cons_type == "Vel":
-            if fk is not None:
-                if isscalar(fk):
-                    f = fk
-                else:
-                    assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
-                    interp_fk = interp1d(kh, fk, kind='cubic')
-                    f = interp_fk(k)
+        if fk is not None:
+            if isscalar(fk):
+                f = fk
             else:
-                f = 1.
-        elif cons_type == "Psi":
+                assert len(fk) == len(kh), 'If fk is scale dependent it must match length of kh'
+                interp_fk = interp1d(kh, fk, kind='cubic')
+                f = interp_fk(k)
+        else:
             f = 1.
         if Rg is None:
             psiT[i] = (1./(2.*np.pi**2.))*simps(f*f*p*spherical_jn(1, k*r[i])/(k*r[i]), k)

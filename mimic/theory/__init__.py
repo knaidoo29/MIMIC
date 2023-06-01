@@ -14,6 +14,21 @@ from .corr2mat import get_corr_dd
 from .corr2mat import get_corr_du
 from .corr2mat import get_corr_uu
 
+from .correlate import _get_adot_phi
+from .correlate import _get_adot_vel
+# from .correlate import get_dd
+# from .correlate import get_dp
+# from .correlate import get_du
+# from .correlate import get_pu
+# from .correlate import get_pp
+# from .correlate import get_uu
+# from .correlate import get_cc_float
+# from .correlate import get_cc_vector
+# from .correlate import get_cc_matrix
+from .correlate import get_cc_vector_fast
+from .correlate import get_cc_matrix_fast
+from .correlate import get_cc_dot_eta_fast
+
 # An overly accurate function for calculating the Hubble expansion rate, with
 # massive neutrinos, should the user desire it.
 from .Hz import z2a
@@ -35,5 +50,3 @@ from .numerical import get_num_fz
 from .numerical import get_num_fzk
 from .numerical import get_mean_Dz
 from .numerical import get_mean_fz
-# from .numerical import prep4MIMIC
-# from .numerical import prep4MIMIC_LCDM

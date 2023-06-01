@@ -1,4 +1,18 @@
 
+from .coords import distance_1d_float
+from .coords import distance_3d_float
+from .coords import get_vec_norm_float
+
+from .fast_correlate import get_dd_float
+from .fast_correlate import get_dp_float
+from .fast_correlate import get_pp_float
+from .fast_correlate import get_cc_float
+from .fast_correlate import get_cc_array1
+from .fast_correlate import get_cc_array2
+from .fast_correlate import get_cc_arrays
+
+from .fast_correlate_eta import corr_dot_eta
+
 from .interp import interp_lin_float
 from .interp import interp_lin_array
 
