@@ -37,8 +37,7 @@ subroutine get_dp_float(x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, logr, zeta, le
   real(kind=dp), intent(in) :: x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, boxsize
   real(kind=dp), intent(out) :: dp_val
 
-  real(kind=dp) :: rx, ry, rz, newr, newrx, newry, newrz, nrx, nry, nrz
-  real(kind=dp) :: nex, ney, nez, zeta_val
+  real(kind=dp) :: rx, ry, rz, newr, newrx, newry, newrz, nrx, nry, nrz, zeta_val
 
   rx = x2-x1
   ry = y2-y1
@@ -47,16 +46,38 @@ subroutine get_dp_float(x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, logr, zeta, le
   call distance_3d_float(rx, ry, rz, boxsize, newr, newrx, newry, newrz)
   call get_vec_norm_float(newrx, newry, newrz, nrx, nry, nrz)
 
-  ! call get_vec_norm_float(ex, ey, ez, nex, ney, nez)
-  nex = ex
-  ney = ey
-  nez = ez
+  call interp_log_float(logr, zeta, lenr, log10(newr), zeta(1), zeta(lenr), zeta_val)
+
+  dp_val = -adot*zeta_val*(ex*nrx + ey*nry + ez*nrz)
+
+end subroutine get_dp_float
+
+
+subroutine get_pd_float(x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, logr, zeta, lenr &
+  , boxsize, pd_val)
+
+  implicit none
+  integer, parameter :: dp = kind(1.d0)
+
+  integer, intent(in) :: lenr
+  real(kind=dp), intent(in) :: logr(lenr), zeta(lenr)
+  real(kind=dp), intent(in) :: x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, boxsize
+  real(kind=dp), intent(out) :: pd_val
+
+  real(kind=dp) :: rx, ry, rz, newr, newrx, newry, newrz, nrx, nry, nrz, zeta_val
+
+  rx = x1-x2
+  ry = y1-y2
+  rz = z1-z2
+
+  call distance_3d_float(rx, ry, rz, boxsize, newr, newrx, newry, newrz)
+  call get_vec_norm_float(newrx, newry, newrz, nrx, nry, nrz)
 
   call interp_log_float(logr, zeta, lenr, log10(newr), zeta(1), zeta(lenr), zeta_val)
 
-  dp_val = -adot*zeta_val*(nex*nrx + ney*nry + nez*nrz)
+  pd_val = -adot*zeta_val*(ex*nrx + ey*nry + ez*nrz)
 
-end subroutine get_dp_float
+end subroutine get_pd_float
 
 
 subroutine get_pp_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2 &
@@ -145,7 +166,7 @@ subroutine get_cc_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2 &
   end if
 
   if ((type1 .eq. 1) .and. (type2 .eq. 0)) then
-    call get_dp_float(x1, x2, y1, y2, z1, z2, ex1, ey1, ez1, adot_phi, logr &
+    call get_pd_float(x1, x2, y1, y2, z1, z2, ex1, ey1, ez1, adot_phi, logr &
       , zeta_p, lenr, boxsize, cc)
   end if
 
@@ -155,7 +176,7 @@ subroutine get_cc_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2 &
   end if
 
   if ((type1 .eq. 2) .and. (type2 .eq. 0)) then
-    call get_dp_float(x1, x2, y1, y2, z1, z2, ex1, ey1, ez1, adot_vel, logr &
+    call get_pd_float(x1, x2, y1, y2, z1, z2, ex1, ey1, ez1, adot_vel, logr &
       , zeta_u, lenr, boxsize, cc)
   end if
 

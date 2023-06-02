@@ -16,18 +16,11 @@ from .corr2mat import get_corr_uu
 
 from .correlate import _get_adot_phi
 from .correlate import _get_adot_vel
-# from .correlate import get_dd
-# from .correlate import get_dp
-# from .correlate import get_du
-# from .correlate import get_pu
-# from .correlate import get_pp
-# from .correlate import get_uu
-# from .correlate import get_cc_float
-# from .correlate import get_cc_vector
-# from .correlate import get_cc_matrix
+from .correlate import get_cc_float_fast
 from .correlate import get_cc_vector_fast
 from .correlate import get_cc_matrix_fast
-from .correlate import get_cc_dot_eta_fast
+from .correlate import get_corr_dot_eta_fast
+from .correlate import get_corr1_dot_inv_dot_corr2_fast
 
 # An overly accurate function for calculating the Hubble expansion rate, with
 # massive neutrinos, should the user desire it.

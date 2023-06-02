@@ -1,6 +1,20 @@
 
 subroutine distance_1d_float(rx, boxsize, newrx)
 
+  ! Distance in 1D.
+  !
+  ! Parameters
+  ! ----------
+  ! rx : float
+  !   Radial distance.
+  ! boxsize : float
+  !   Boxsize.
+  !
+  ! Returns
+  ! -------
+  ! newrx : float
+  !   Distance with periodic conditions.
+
   implicit none
   integer, parameter :: dp = kind(1.d0)
 
@@ -21,6 +35,22 @@ end subroutine distance_1d_float
 
 subroutine distance_3d_float(rx, ry, rz, boxsize, newr, newrx, newry, newrz)
 
+  ! Distance in 3D.
+  !
+  ! Parameters
+  ! ----------
+  ! rx, ry, rz : float
+  !   Radial distance in each axis.
+  ! boxsize : float
+  !   Boxsize.
+  !
+  ! Returns
+  ! -------
+  ! newr : float
+  !   Distance with periodic conditions.
+  ! newrx, newry, newrz : float
+  !   Distance with periodic conditions in each axes.
+
   implicit none
   integer, parameter :: dp = kind(1.d0)
 
@@ -37,6 +67,18 @@ end subroutine distance_3d_float
 
 
 subroutine get_vec_norm_float(x, y, z, nx, ny, nz)
+
+  ! Normalise vector.
+  !
+  ! Parameters
+  ! ----------
+  ! x, y, z : float
+  !   Vector.
+  !
+  ! Returns
+  ! -------
+  ! nx, ny, nz : float
+  !   Normalised vector.
 
   implicit none
   integer, parameter :: dp = kind(1.d0)
