@@ -40,15 +40,21 @@ class MIMIC:
 
     def __init__(self, MPI=None):
         """Initialise the MIMIC main class."""
+
         # Global variables
         self.MPI = MPI
         self.FFT = None
         self.FFT_Ngrid = None
         self.ERROR = False
-        self.rank = 0
 
+        # Added to *eventually* include no MPI functionality. This may not be
+        # added, as it's unclear whether this will be necessary in the long run.
         if self.MPI is not None:
             self.rank = self.MPI.rank
+            self.nompi = False
+        else:
+            self.rank = 0
+            self.nompi = True
 
         # Time Variables
         self.time = {
@@ -86,7 +92,7 @@ class MIMIC:
             "Rg": None,
             "CorrFile": None,
             "CovFile": None,
-            "Sigma_NR": None,
+            "Sigma_NL": None,
             "Type": "Vel",
             "RZA_Method": 2,
         }
@@ -161,7 +167,9 @@ class MIMIC:
         self.interp_psiT_pu = None
         self.interp_psiR_uu = None
         self.interp_psiT_uu = None
+        self.cov = None
         self.inv = None
+        self.cov_CR = None
         self.inv_CR = None
         self.eta = None
         self.eta_CR = None
@@ -187,7 +195,7 @@ class MIMIC:
 
     def _print_zero(self, *value):
         """Print at rank=0."""
-        if self.MPI is None:
+        if self.nompi is None:
             print(*value, flush=True)
         else:
             self.MPI.mpi_print_zero(*value)
@@ -237,9 +245,10 @@ class MIMIC:
         self._print_zero(" Parameters")
         self._print_zero(" ==========")
 
-        self._print_zero()
-        self._print_zero(" MPI:")
-        self._print_zero(" -", self.MPI.size, "Processors")
+        if self.nompi is False:
+            self._print_zero()
+            self._print_zero(" MPI:")
+            self._print_zero(" -", self.MPI.size, "Processors")
 
         # Read in Cosmological parameters
         self._print_zero()
@@ -285,7 +294,7 @@ class MIMIC:
                 self.constraints["CorrFile"] = params["Constraints"]["CorrFile"]
             if self._check_param_key(params["Constraints"], "CovFile"):
                 self.constraints["CovFile"] = params["Constraints"]["CovFile"]
-            self.constraints["Sigma_NR"] = float(params["Constraints"]["Sigma_NR"])
+            self.constraints["Sigma_NL"] = float(params["Constraints"]["Sigma_NL"])
 
             self._print_zero()
             self._check_exist(self.constraints["Fname"])
@@ -300,7 +309,7 @@ class MIMIC:
                  self._check_exist(self.constraints["CovFile"])
             self._print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
 
-            self._print_zero(" - Sigma_NR \t\t=", self.constraints["Sigma_NR"])
+            self._print_zero(" - Sigma_NL \t\t=", self.constraints["Sigma_NL"])
 
             # Defines RZA Method -- for future use not currently implemented.
             if self._check_param_key(params["Constraints"], "RZA_Method"):
@@ -416,6 +425,7 @@ class MIMIC:
 
         self._print_zero(" - Create P(k) interpolator")
         self.kmin, self.kmax = self.theory_kh.min(), self.theory_kh.max()
+
         self.interp_pk = interp1d(self.theory_kh, self.theory_pk, kind='cubic',
             bounds_error=False, fill_value=0.)
 
@@ -543,8 +553,10 @@ class MIMIC:
 
         self._print_zero(" - Compute correlators in parallel")
 
-        self.sim_kmin = None
-        self.sim_kmax = None
+        #self.sim_kmin = None
+        #self.sim_kmax = None
+        self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
+        self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
 
         self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 100)
 
@@ -675,6 +687,10 @@ class MIMIC:
         self.interp_psiT_uu = interp1d(self.corr_r, self.corr_psiT_uu, kind='cubic', bounds_error=False, fill_value=0.)
 
 
+    def _save_cov(self):
+        fname = self._get_fname_prefix() + 'cov.npz'
+        np.savez(fname, cov=self.cov, sigma_NL=self.constraints["Sigma_NL"], c=self.cons_c, type_c=self.cons_c_type)
+
 
     def compute_eta(self):
         self._print_zero()
@@ -694,11 +710,6 @@ class MIMIC:
 
         self._print_zero(" - Compute vel-vel covariance matrix in parallel")
 
-        # cov_cc = theory.get_cc_matrix(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-        #     type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-        #     self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-        #     self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, boxsize=self.siminfo["Boxsize"])
-
         cov_cc = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
             type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
             self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
@@ -707,22 +718,19 @@ class MIMIC:
 
         self._print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
 
-        cov_cc = self.MPI.collect(cov_cc)
+        self.cov = self.MPI.collect(cov_cc)
+        self.cov = self.MPI.broadcast(self.cov)
 
         if self.rank == 0:
-            cov_cc += np.diag(self.cons_c_err**2.)
-            # add sigma_NR more error?
+            self.cov += np.diag(self.cons_c_err**2. + self.constraints["Sigma_NL"]**2.)
 
-            fname = self._get_fname_prefix() + 'cov.npz'
-            np.savez(fname, cov=cov_cc)
+            self._save_cov()
 
             self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
-            inv_cc = np.linalg.inv(cov_cc)
-
-            self.inv = np.copy(inv_cc)
+            self.inv = np.linalg.inv(self.cov)
 
             self._print_zero(" - Compute eta vector [at MPI.rank = 0]")
-            self.eta = inv_cc.dot(self.cons_c)
+            self.eta = self.inv.dot(self.cons_c)
 
         self.MPI.wait()
 
@@ -847,14 +855,6 @@ class MIMIC:
         self.get_grid3D()
         self.flatten_grid3D()
 
-        # z0 = self.constraints["z_eff"]
-        # Hz = self.interp_Hz(z0)
-        #
-        # if self.constraints["Type"] == "Vel":
-        #     adot = theory.z2a(z0)*Hz
-        # elif self.constraints["Type"] == "Psi":
-        #     adot = 1.
-
         self._print_zero()
         self._print_zero(" - Computing Wiener Filter density")
 
@@ -871,41 +871,30 @@ class MIMIC:
             self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
             mpi_rank=self.MPI.rank, minlogr=-2)
 
-        self._print_zero()
-        self._print_zero(" - Computing Wiener Filter density error")
-
-        # ex1 = np.ones(np.shape(self.x3D))*exi
-        # type1 = np.ones(np.shape(self.x3D))*typei
-        # type1 = type1.astype('int')
-
-        # dens_err_WF = theory.get_cc_matrix_fast(self.x3D, np.copy(self.x3D), self.y3D,
-        #     np.copy(self.y3D), self.z3D, np.copy(self.z3D), ex1, ex1, ex1, ex1, ex1, ex1,
-        #     type1, type1, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
+        # self._print_zero()
+        # self._print_zero(" - Computing Wiener Filter density error")
+        #
+        # dens_err_WF = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, exi, exi,
+        #     exi, exi, 0, 0, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
         #     self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
         #     self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
         #     minlogr=-2)
-
-        dens_err_WF = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, exi, exi,
-            exi, exi, 0, 0, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-            self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-            self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-            minlogr=-2)
-
-        dens_err_WF -= theory.get_corr1_dot_inv_dot_corr2_fast(self.x3D, np.copy(self.x3D), self.cons_x,
-            self.y3D, np.copy(self.y3D), self.cons_y, self.z3D, np.copy(self.z3D), self.cons_z,
-            exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
-            self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
-            self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
-            self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
-            len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
+        #
+        # dens_err_WF -= theory.get_corr1_dot_inv_dot_corr2_fast(self.x3D, np.copy(self.x3D), self.cons_x,
+        #     self.y3D, np.copy(self.y3D), self.cons_y, self.z3D, np.copy(self.z3D), self.cons_z,
+        #     exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
+        #     self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
+        #     self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
+        #     self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
+        #     len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
 
         self.unflatten_grid3D()
         dens_WF = dens_WF.reshape(self.x_shape)
-        dens_err_WF = dens_err_WF.reshape(self.x_shape)
+        #dens_err_WF = dens_err_WF.reshape(self.x_shape)
 
         self._print_zero()
         self.save_WF(dens_WF)
-        self.save_err_WF(dens_err_WF)
+        #self.save_err_WF(dens_err_WF)
 
         if self.what2run["RZA"]:
             self.dens_WF = dens_WF
@@ -1241,7 +1230,7 @@ class MIMIC:
 
         if self.rank == 0:
             cov_cc += np.diag(self.cons_c_err**2.)
-            # add sigma_NR more error?
+            # add sigma_NL more error?
 
             self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
             inv_cc = np.linalg.inv(cov_cc)
@@ -1488,8 +1477,6 @@ class MIMIC:
         # Theory
         self.time["Prep_Start"] = time.time()
         self.prep()
-        #self._load_correlators(self.constraints["z_eff"])
-        #self._calc_correlators(self.constraints["z_eff"])
         self.compute_eta()
         self.time["Prep_End"] = time.time()
 

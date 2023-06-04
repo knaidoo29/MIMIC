@@ -41,8 +41,8 @@ from .mpi_kgrid import mpi_kgrid3D
 # from .pofk import get_pofk_2D
 # from .pofk import get_pofk_3D
 
-# from .utils import get_kf
-# from .utils import get_kn
+from .utils import get_kf
+from .utils import get_kn
 # from .utils import fftshift
 # from .utils import ifftshift
 # from .utils import normalise_freq

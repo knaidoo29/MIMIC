@@ -1,0 +1,41 @@
+
+Cosmology:
+  H0: 67.66
+  Omega_m: 0.3111
+  PowerSpecFile: 'LCDM_pk0.npz'
+  ScaleDepGrowth: False
+  GrowthFile: 'LCDM_growth_scale_indep.npz'
+
+Siminfo:
+  Simname: "CF2"
+  Boxsize: 500.
+  Ngrid: 32
+
+Constraints:
+  Fname : 'CF2.npz'
+  z_eff: 0.
+  Rg: 0.
+
+Covariance:
+  Optimise: True
+  Sigma_NL: 0.
+
+WienerFilter:
+  Field: 'dens'
+  # Field: vel_x, vel_y, vel_z, vel_r
+  # Field: phi_x, phi_y, phi_z, phi_r
+  SubBoxsize: 100.
+  SubNgrid: 128
+  
+RZA:
+  Method: 2
+
+ICs:
+  Seed: 504
+  # WNFile: "WN_128.npz"
+  z_ic: 30.
+  CR: True
+
+Outputs:
+  OutputFolder: '32v2'
+  Prefix: 'CF2_'
