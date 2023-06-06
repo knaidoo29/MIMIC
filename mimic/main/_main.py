@@ -10,8 +10,6 @@ from ..ext import fiesta, shift
 
 from .. import field, io, src, theory
 
-from . import cov_optimiser
-
 
 mimic_beg = """
  ______________________________________________________________________________
@@ -39,6 +37,7 @@ mimic_end = """
 
 class MIMIC:
 
+
     def __init__(self, MPI=None):
         """Initialise the MIMIC main class."""
 
@@ -65,8 +64,6 @@ class MIMIC:
             "Prep_End": None,
             "WF_Start": None,
             "WF_End": None,
-            "WF_Sub_Start": None,
-            "WF_Sub_End": None,
             "RZA_Start": None,
             "RZA_End": None,
             "CR_Prep_Start": None,
@@ -83,7 +80,7 @@ class MIMIC:
             "Omega_m": None,
             "PowerSpecFile": None,
             "ScaleDepGrowth": None,
-            "GrowthFile": None
+            "GrowthFile": None,
         }
         self.siminfo = {
             "Boxsize": None,
@@ -95,35 +92,21 @@ class MIMIC:
             "Rg": None,
             "CorrFile": None,
             "CovFile": None,
-            "CovOptimise": False,
-            "dens_Sigma_NL": 0.,
-            "phi_Sigma_NL": 0.,
-            "vel_Sigma_NL": 0.,
-            "klims": True
+            "Sigma_NL": None,
+            "Type": "Vel",
+            "RZA_Method": 2
         }
-        self.WF = {
-            "Field": None,
-            "SubBoxsize": None,
-            "SubNgrid": None,
-            "CalcError": None
-        }
-        self.RZA = {
-            "Method": None
+        self.outputs = {
+            "OutputFolder": None,
+            "Prefix": None
         }
         self.ICs = {
             "Seed": None,
             "WNFile": None,
             "z_ic": None
         }
-        self.outputs = {
-            "OutputFolder": None,
-            "Prefix": None
-        }
-        # Need to think about this
         self.what2run = {
             "WF": None,
-            "WF_SubBox": None,
-            "WF_Error": None,
             "RZA": None,
             "CR": None,
             "IC": None
@@ -163,11 +146,6 @@ class MIMIC:
         self.ky3D = None
         self.kz3D = None
         self.k_shape = None
-        # subgrid info
-        self.sub_x3D = None
-        self.sub_y3D = None
-        self.sub_z3D = None
-        self.sub_x_shape = None
         # correlators
         self.corr_redshift = None
         self.corr_r = None
@@ -189,7 +167,6 @@ class MIMIC:
         self.interp_psiT_pu = None
         self.interp_psiR_uu = None
         self.interp_psiT_uu = None
-        # Covariance related data
         self.cov = None
         self.inv = None
         self.cov_CR = None
@@ -215,12 +192,6 @@ class MIMIC:
         # output
         self.fname_prefix = None
 
-    def start(self):
-        """Starts the run and timers."""
-        self.time["Start"] = time.time()
-        self._print_zero(mimic_beg)
-
-    # Utility functions --------------------------------------------------------
 
     def _print_zero(self, *value):
         """Print at rank=0."""
@@ -229,20 +200,18 @@ class MIMIC:
         else:
             self.MPI.mpi_print_zero(*value)
 
+
+    def start(self):
+        """Starts the run and timers."""
+        self.time["Start"] = time.time()
+        self._print_zero(mimic_beg)
+
+
     def _break4error(self):
-        """Forces MIMIC to break if an error is detected."""
         io._break4error(self.ERROR)
 
-    def _check_exist(self, fname):
-        """Checks whether a file exists, and breaks if it does not."""
-        if io.isfile(fname) is False:
-            self.ERROR = True
-        io._error_message(self.ERROR, "File %s does not exist" % fname, MPI=self.MPI)
-        self._break4error()
 
     def _get_fname_prefix(self):
-        """Returns a filename prefix based on ouput folder and file name prefix
-        entered."""
         self.fname_prefix = self.outputs["OutputFolder"]
         if self.rank == 0:
             if io.isfolder(self.fname_prefix) == False:
@@ -252,7 +221,6 @@ class MIMIC:
         self.fname_prefix += self.outputs["Prefix"]
         return self.fname_prefix
 
-    # Parameter file read and management ---------------------------------------
 
     def _check_param_key(self, params, key):
         """Check param key exists in dictionary, and if key is not None."""
@@ -261,6 +229,14 @@ class MIMIC:
                 return True
         else:
             return False
+
+
+    def _check_exist(self, fname):
+        if io.isfile(fname) is False:
+            self.ERROR = True
+        io._error_message(self.ERROR, "File %s does not exist" % fname, MPI=self.MPI)
+        self._break4error()
+
 
     def _read_params(self, params):
         """Reads parameter file."""
@@ -314,98 +290,48 @@ class MIMIC:
             self.constraints["z_eff"] = float(params["Constraints"]["z_eff"])
             self.constraints["Rg"] = float(params["Constraints"]["Rg"])
 
+            if self._check_param_key(params["Constraints"], "CorrFile"):
+                self.constraints["CorrFile"] = params["Constraints"]["CorrFile"]
+            if self._check_param_key(params["Constraints"], "CovFile"):
+                self.constraints["CovFile"] = params["Constraints"]["CovFile"]
+            self.constraints["Sigma_NL"] = float(params["Constraints"]["Sigma_NL"])
+
             self._print_zero()
             self._check_exist(self.constraints["Fname"])
             self._print_zero(" - Fname \t\t=", self.constraints["Fname"])
             self._print_zero(" - z_eff \t\t=", self.constraints["z_eff"])
             self._print_zero(" - Rg \t\t\t=", self.constraints["Rg"])
 
-            if self._check_param_key(params["Constraints"], "CorrFile"):
-                if params["Constraints"]["CorrFile"] != 'None':
-                    self.constraints["CorrFile"] = params["Constraints"]["CorrFile"]
-                    self._check_exist(self.constraints["CorrFile"])
-                    self._print_zero(" - CorrFile \t\t=", self.constraints["CorrFile"])
+            if self.constraints["CorrFile"] is not None:
+                 self._check_exist(self.constraints["CorrFile"])
+            self._print_zero(" - CorrFile \t\t=", self.constraints["CorrFile"])
+            if self.constraints["CovFile"] is not None:
+                 self._check_exist(self.constraints["CovFile"])
+            self._print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
 
-            if self._check_param_key(params["Constraints"], "CovFile"):
-                if str(params["Constraints"]["CovFile"]) != "None":
-                    self.constraints["CovFile"] = params["Constraints"]["CovFile"]
-                    self._check_exist(self.constraints["CovFile"])
-                    self._print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
+            self._print_zero(" - Sigma_NL \t\t=", self.constraints["Sigma_NL"])
 
-            if self._check_param_key(params["Constraints"], "CovOptimise"):
-                if params["Constraints"]["CovOptimise"] != "None":
-                    self.constraints["CovOptimise"] = bool(params["Constraints"]["CovOptimise"])
-                    self._print_zero(" - CovOptimise \t\t=", io.bool2yesno(self.constraints["CovOptimise"]))
+            # Defines RZA Method -- for future use not currently implemented.
+            if self._check_param_key(params["Constraints"], "RZA_Method"):
+                self.constraints["RZA_Method"] = int(params["Constraints"]["RZA_Method"])
+                self._print_zero(" - RZA_Method \t\t=", self.constraints["RZA_Method"])
 
-            if self._check_param_key(params["Constraints"], "dens_Sigma_NL"):
-                if params["Constraints"]["dens_Sigma_NL"] != 'None':
-                    self.constraints["dens_Sigma_NL"] = float(params["Constraints"]["dens_Sigma_NL"])
-                    self._print_zero(" - dens_Sigma_NL \t=", self.constraints["dens_Sigma_NL"])
+            if self._check_param_key(params["Constraints"], "WF"):
+                self.what2run["WF"] = bool(params["Constraints"]["WF"])
+            else:
+                self.what2run["WF"] = False
 
-            if self._check_param_key(params["Constraints"], "phi_Sigma_NL"):
-                if params["Constraints"]["phi_Sigma_NL"] != "None":
-                    self.constraints["phi_Sigma_NL"] = float(params["Constraints"]["phi_Sigma_NL"])
-                    self._print_zero(" - phi_Sigma_NL \t=", self.constraints["phi_Sigma_NL"])
+            if self._check_param_key(params["Constraints"], "RZA"):
+                self.what2run["RZA"] = bool(params["Constraints"]["RZA"])
+            else:
+                self.what2run["RZA"] = False
 
-            if self._check_param_key(params["Constraints"], "vel_Sigma_NL"):
-                if params["Constraints"]["vel_Sigma_NL"] != "None":
-                    self.constraints["vel_Sigma_NL"] = float(params["Constraints"]["vel_Sigma_NL"])
-                    self._print_zero(" - vel_Sigma_NL \t=", self.constraints["vel_Sigma_NL"])
+            # RZA can only be performed in WF is computed
+            if self.what2run["RZA"]:
+                self.what2run["WF"] = True
 
-            if self._check_param_key(params["Constraints"], "klims"):
-                if params["Constraints"]["klims"] != "None":
-                    self.constraints["klims"] = bool(params["Constraints"]["klims"])
-                    self._print_zero(" - klims \t\t=", io.bool2yesno(self.constraints["klims"]))
-
-
-        if self._check_param_key(params, "WF"):
-
-            self._print_zero()
-            self._print_zero(" WF:")
-
-            self.WF["Field"] = params["WF"]["Field"]
-
-            check = io.inlist(self.WF["Field"], ["dens", "phi_x", "phi_y", "phi_z", "phi_r",
-                "vel_x", "vel_y", "vel_z", "vel_r"])
-
-            self.ERROR = io._error_if_false(check)
-            io._error_message(self.ERROR, "Field string is unsupported, current %s but must be either 'dens', 'phi_x', 'phi_y', 'phi_z', 'vel_x', 'vel_y' and 'vel_z'.")
-
-            self._print_zero(" - Field \t\t=", self.WF["Field"])
-
-            if self._check_param_key(params["WF"], "SubBoxsize"):
-
-                if params["WF"]["SubBoxsize"] != "None":
-                    self.WF["SubBoxsize"] = float(params["WF"]["SubBoxsize"])
-                    self._print_zero(" - SubBoxsize \t\t=", self.WF["SubBoxsize"])
-
-                if params["WF"]["SubNgrid"] != "None":
-                    self.WF["SubNgrid"] = int(params["WF"]["SubNgrid"])
-                    self._print_zero(" - SubNgrid \t\t=", self.WF["SubNgrid"])
-
-                if params["WF"]["CalcError"] != "None":
-                    self.WF["CalcError"] = bool(params["WF"]["CalcError"])
-                    self._print_zero(" - CalcError \t\t=", io.bool2yesno(self.WF["CalcError"]))
-
-                self.what2run["WF_SubBox"] = True
-                self.what2run["WF_Error"] = self.WF["CalcError"]
-
-        if self._check_param_key(params, "RZA"):
-
-            self._print_zero()
-            self._print_zero(" RZA:")
-
-            self.RZA["Method"] = int(params["RZA"]["Method"])
-            self._print_zero(" - Method \t\t=", self.RZA["Method"])
-
-            if self.WF["Field"] != "dens":
-                self.ERROR = True
-
-            io._error_message(self.ERROR, "Field must be density ('dens') if RZA is required", MPI=self.MPI)
-            self._break4error()
-
-            self.what2run["WF"] = True
-            self.what2run["RZA"] = True
+            self._print_zero(" - WF \t\t\t=", io.bool2yesno(self.what2run["WF"]))
+            self._print_zero(" - RZA \t\t\t=", io.bool2yesno(self.what2run["RZA"]))
 
         # ICs
         if self._check_param_key(params, "ICs"):
@@ -418,19 +344,13 @@ class MIMIC:
                 self._print_zero()
                 self._print_zero(" - Seed \t\t=", self.ICs["Seed"])
             elif self._check_param_key(params["ICs"], "WNFile"):
-                if params["ICs"]["WNFile"] != "None":
-                    self.ICs["WNFile"] = str(params["ICs"]["WNFile"])
-                    self._check_exist(self.ICs["WNFile"])
-                    self._break4error()
-                    self._print_zero()
-                    self._print_zero(" - WNFile \t\t=", self.ICs["WNFile"])
-                else:
-                    self.ERROR = True
+                self.ICs["WNFile"] = str(params["ICs"]["WNFile"])
+                self._print_zero()
+                self._print_zero(" - WNFile \t\t=", self.ICs["WNFile"])
             else:
                 self.ERROR = True
-
-            io._error_message(self.ERROR, "Must specify either a Seed or WNFile.", MPI=self.MPI)
-            self._break4error()
+                self._print_zero(" ERROR: Must specify either a Seed or WNFile.")
+                self._break4error()
 
             self.ICs["z_ic"] = float(params["ICs"]["z_ic"])
             self._print_zero(" - z_ic \t\t=", self.ICs["z_ic"])
@@ -467,7 +387,6 @@ class MIMIC:
         self._read_params(self.params)
         self._break4error()
 
-    # Theory Calculations ------------------------------------------------------
 
     def _get_growth_D(self, redshift, kmag=None):
         """Returns the linear growth function from tabulated scale dependent and
@@ -489,14 +408,12 @@ class MIMIC:
             return theory.get_growth_f(redshift, self.growth_z, self.growth_fz)
 
     def _prep_grid(self):
-        """Prepares MPI grid partitioning class."""
         self.SBX = fiesta.coords.MPI_SortByX(self.MPI)
         self.SBX.settings(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
         self.SBX.limits4grid()
 
+
     def _prep_theory(self):
-        """Loads theory related functions, i.e. power spectra, expansion rate
-        and growth functions."""
         self._print_zero()
         self._print_zero(" Theory")
         self._print_zero(" ======")
@@ -540,10 +457,8 @@ class MIMIC:
             self.growth_Dz = growth_Dz
             self.growth_fz = growth_fz
 
-    # Constraints management ---------------------------------------------------
 
     def _check_constraints(self):
-        """Check constraints are within the box."""
         self._print_zero()
         self._print_zero(" - Prepare Constraints")
         # Normalise direction
@@ -572,7 +487,6 @@ class MIMIC:
 
 
     def _prep_constraints(self):
-        """Preparing constraints, i.e. loading and moving to the center of the box."""
         self._print_zero()
         self._print_zero(" Constraints")
         self._print_zero(" ===========")
@@ -592,10 +506,8 @@ class MIMIC:
         self.cons_z += self.halfsize
         self._check_constraints()
 
-    # Correlation functions ----------------------------------------------------
 
     def _save_correlators(self):
-        """Save correlation functions."""
         if self.rank == 0:
             fname_prefix = self._get_fname_prefix()
             fname = fname_prefix + "correlator.npz"
@@ -607,7 +519,6 @@ class MIMIC:
 
 
     def _load_correlators(self):
-        """Load correlation functions."""
         if self.constraints["CorrFile"] is not None:
             self._print_zero(" - loading correlator file %s" % self.constraints["CorrFile"])
             if self.rank == 0:
@@ -639,20 +550,13 @@ class MIMIC:
 
 
     def _calc_correlators(self):
-        """Calculate correlation functions."""
+
         self._print_zero(" - Compute correlators in parallel")
 
-        if self.constraints["klims"]:
-            if self.what2run["WF"] or self.what2run["CR"] or self.what2run["IC"]:
-                self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
-                self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
-
-            elif self.what2run["WF_SubBox"]:
-                self.sim_kmin = shift.cart.get_kf(self.WF["SubBoxsize"])
-                self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
-        else:
-            self.sim_kmin = None
-            self.sim_kmax = None
+        #self.sim_kmin = None
+        #self.sim_kmax = None
+        self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
+        self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
 
         self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 100)
 
@@ -759,7 +663,6 @@ class MIMIC:
 
 
     def _prep_correlators(self, redshift):
-        """Constructing correlation interpolation functions."""
         self._print_zero()
         self._print_zero(" Correlators")
         self._print_zero(" ===========")
@@ -783,110 +686,16 @@ class MIMIC:
         self.interp_psiR_uu = interp1d(self.corr_r, self.corr_psiR_uu, kind='cubic', bounds_error=False, fill_value=0.)
         self.interp_psiT_uu = interp1d(self.corr_r, self.corr_psiT_uu, kind='cubic', bounds_error=False, fill_value=0.)
 
-    # This might need some rethinking, naming wise rather than pipeline.
-    def prep(self):
-        """Runs all the grid, theory and constraint preparation functions."""
-        self._prep_grid()
-        self._prep_theory()
-        self._prep_constraints()
-        self._prep_correlators(self.constraints["z_eff"])
-
-    # Wiener Filtering ----------------------------------------------------
 
     def _save_cov(self):
-        """Save covariance matrix."""
         fname = self._get_fname_prefix() + 'cov.npz'
-        np.savez(fname, cov=self.cov, c=self.cons_c, c_type=self.cons_c_type)
+        np.savez(fname, cov=self.cov, sigma_NL=self.constraints["Sigma_NL"], c=self.cons_c, type_c=self.cons_c_type)
 
-    def _cov_opt(self):
-        """Optimise covariance non-linear dispersion"""
+
+    def compute_eta(self):
         self._print_zero()
-        self._print_zero(" - Optimising non-linear dispersion errors [at MPI.rank = 0]")
-
-        # Density non-linear dispersion
-        cond = np.where(self.cons_c_type == 0)[0]
-        if len(cond) > 0:
-            self._print_zero(" -- Optimising density dispersion [at MPI.rank = 0]")
-            if self.MPI.rank == 0:
-                _cov = self.cov[cond]
-                _cov = _cov[:, cond]
-                success, sigma_NL = cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
-                    _cov, max_sig_NL=10., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
-            else:
-                success, sigma_NL = None, None
-
-            self.MPI.wait()
-
-            success = self.MPI.broadcast(success)
-            sigma_NL = self.MPI.broadcast(sigma_NL)
-
-            if success:
-                self.constraints["den_Sigma_NL"] = sigma_NL
-            else:
-                self.ERROR = True
-            io._error_message(self.ERROR, "Density dispersion optimisation failed.")
-            self._break4error()
-
-        self.constraints["vel_Sigma_NL"] = self.MPI.broadcast(self.constraints["vel_Sigma_NL"])
-
-        # Displacement non-linear dispersion
-        cond = np.where(self.cons_c_type == 1)[0]
-        if len(cond) > 0:
-            self._print_zero(" -- Optimising displacement dispersion [at MPI.rank = 0]")
-            if self.MPI.rank == 0:
-                _cov = self.cov[cond]
-                _cov = _cov[:, cond]
-                success, sigma_NL = cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
-                    _cov, max_sig_NL=5., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
-            else:
-                success, sigma_NL = None, None
-
-            self.MPI.wait()
-
-            success = self.MPI.broadcast(success)
-            sigma_NL = self.MPI.broadcast(sigma_NL)
-
-            if success:
-                self.constraints["phi_Sigma_NL"] = sigma_NL
-            else:
-                self.ERROR = True
-            io._error_message(self.ERROR, "Displacement dispersion optimisation failed.")
-            self._break4error()
-
-        self.constraints["phi_Sigma_NL"] = self.MPI.broadcast(self.constraints["phi_Sigma_NL"])
-
-        # Velocity non-linear dispersion
-        cond = np.where(self.cons_c_type == 2)[0]
-        if len(cond) > 0:
-            self._print_zero(" -- Optimising velocity dispersion [at MPI.rank = 0]")
-            if self.MPI.rank == 0:
-                _cov = self.cov[cond]
-                _cov = _cov[:, cond]
-                success, sigma_NL = cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
-                    _cov, max_sig_NL=400., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
-            else:
-                success, sigma_NL = None, None
-
-            self.MPI.wait()
-
-            success = self.MPI.broadcast(success)
-            sigma_NL = self.MPI.broadcast(sigma_NL)
-
-            if success:
-                self.constraints["vel_Sigma_NL"] = sigma_NL
-            else:
-                self.ERROR = True
-            io._error_message(self.ERROR, "Velocity dispersion optimisation failed.")
-            self._break4error()
-
-        self.constraints["vel_Sigma_NL"] = self.MPI.broadcast(self.constraints["vel_Sigma_NL"])
-
-
-    def compute_cov(self):
-        """Computes the covariance and eta-vector for the Wiener Filtering."""
-        self._print_zero()
-        self._print_zero(" Compute covariance and eta-vector")
-        self._print_zero(" =================================")
+        self._print_zero(" Compute eta-vector")
+        self._print_zero(" ==================")
         self._print_zero()
 
         x1, x2 = self.MPI.create_split_ndgrid([self.cons_x, self.cons_x], [False, True])
@@ -899,36 +708,21 @@ class MIMIC:
 
         type1, type2 = self.MPI.create_split_ndgrid([self.cons_c_type, self.cons_c_type], [False, True])
 
-        self._print_zero(" - Compute constraint-constraint covariance matrix in parallel")
+        self._print_zero(" - Compute vel-vel covariance matrix in parallel")
 
-        _cov = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+        cov_cc = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
             type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
             self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
             self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
             minlogr=-2)
 
-        self._print_zero(" - Collect constraint-constraint covariance matrix [at MPI.rank = 0]")
+        self._print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
 
-        self.cov = self.MPI.collect(_cov)
+        self.cov = self.MPI.collect(cov_cc)
         self.cov = self.MPI.broadcast(self.cov)
-        self.cov += np.diag(self.cons_c_err**2.)
-
-        if self.constraints["CovOptimise"]:
-            self._cov_opt()
 
         if self.rank == 0:
-            sigma_NL = np.ones(len(self.cons_c))
-
-            cond = np.where(self.cons_c_type == 0)[0]
-            sigma_NL[cond] = self.constraints["dens_Sigma_NL"]
-
-            cond = np.where(self.cons_c_type == 1)[0]
-            sigma_NL[cond] = self.constraints["phi_Sigma_NL"]
-
-            cond = np.where(self.cons_c_type == 2)[0]
-            sigma_NL[cond] = self.constraints["vel_Sigma_NL"]
-
-            self.cov += np.diag(sigma_NL**2)
+            self.cov += np.diag(self.cons_c_err**2. + self.constraints["Sigma_NL"]**2.)
 
             self._save_cov()
 
@@ -941,16 +735,21 @@ class MIMIC:
         self.MPI.wait()
 
         self._print_zero(" - Broadcast eta vector")
-        self.cov = self.MPI.broadcast(self.cov)
         self.eta = self.MPI.broadcast(self.eta)
         self.inv = self.MPI.broadcast(self.inv)
 
         self.MPI.wait()
 
-    # Real and Fourier Grid functions ------------------------------------------
+
+    def prep(self):
+        """Runs all the grid, theory and constraint preparation functions."""
+        self._prep_grid()
+        self._prep_theory()
+        self._prep_constraints()
+        self._prep_correlators(self.constraints["z_eff"])
+
 
     def get_grid3D(self):
-        """Constructs the 3 dimension grid."""
         if self.x3D is None:
             self._print_zero(" - Construct cartesian grid")
             self.x3D, self.y3D, self.z3D = shift.cart.mpi_grid3D(self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
@@ -958,47 +757,22 @@ class MIMIC:
 
 
     def flatten_grid3D(self):
-        """Flattens the 3d real space grid."""
         self.x3D = self.x3D.flatten()
         self.y3D = self.y3D.flatten()
         self.z3D = self.z3D.flatten()
 
 
     def unflatten_grid3D(self):
-        """Unflatten the 3d real space grid."""
         self.x3D = self.x3D.reshape(self.x_shape)
         self.y3D = self.y3D.reshape(self.x_shape)
         self.z3D = self.z3D.reshape(self.x_shape)
 
 
-    def get_subgrid3D(self):
-        """Constructs the 3 dimension grid."""
-        if self.sub_x3D is None:
-            self._print_zero(" - Construct sub-cartesian grid")
-            self.sub_x3D, self.sub_y3D, self.sub_z3D = shift.cart.mpi_grid3D(self.WF["SubBoxsize"], self.WF["SubNgrid"], self.MPI)
-            self.sub_x_shape = np.shape(self.sub_x3D)
-            center_of_subbox = self.WF["SubBoxsize"]/2.
-            self.sub_x3D += self.halfsize - center_of_subbox
-            self.sub_y3D += self.halfsize - center_of_subbox
-            self.sub_z3D += self.halfsize - center_of_subbox
-
-
-    def flatten_subgrid3D(self):
-        """Flattens the 3d real space sub-grid."""
-        self.sub_x3D = self.sub_x3D.flatten()
-        self.sub_y3D = self.sub_y3D.flatten()
-        self.sub_z3D = self.sub_z3D.flatten()
-
-
-    def unflatten_subgrid3D(self):
-        """Unflatten the 3d real space sub-grid."""
-        self.sub_x3D = self.sub_x3D.reshape(self.sub_x_shape)
-        self.sub_y3D = self.sub_y3D.reshape(self.sub_x_shape)
-        self.sub_z3D = self.sub_z3D.reshape(self.sub_x_shape)
+    def get_grid_mag(self):
+        return np.sqrt(self.x3D**2. + self.y3D**2. + self.z3D**2.)
 
 
     def get_kgrid3D(self):
-        """Constructs the 3 dimensional Fourier Grid"""
         if self.kx3D is None:
             self._print_zero(" - Construct Fourier grid")
             self.kx3D, self.ky3D, self.kz3D = shift.cart.mpi_kgrid3D(self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
@@ -1006,26 +780,37 @@ class MIMIC:
 
 
     def flatten_kgrid3D(self):
-        """Flattens the 3d Fourier space grid."""
         self.kx3D = self.kx3D.flatten()
         self.ky3D = self.ky3D.flatten()
         self.kz3D = self.kz3D.flatten()
 
 
     def unflatten_kgrid3D(self):
-        """Unflattens the 3d Fourier space grid."""
         self.kx3D = self.kx3D.reshape(self.k_shape)
         self.ky3D = self.ky3D.reshape(self.k_shape)
         self.kz3D = self.kz3D.reshape(self.k_shape)
 
 
     def get_kgrid_mag(self):
-        """Returns the Fourier grid magnitudes."""
         return np.sqrt(self.kx3D**2. + self.ky3D**2. + self.kz3D**2.)
 
 
+    def _get_WF_single(self, x, y, z, adot, i, total):
+        rx = self.cons_x - x
+        ry = self.cons_y - y
+        rz = self.cons_z - z
+        r = np.sqrt(rx**2. + ry**2. + rz**2.)
+        norm_rx = np.copy(rx)/r
+        norm_ry = np.copy(ry)/r
+        norm_rz = np.copy(rz)/r
+        cov_du = self.interp_zeta_u(r)
+        du = - adot*cov_du*norm_rx*self.cons_ex - adot*cov_du*norm_ry*self.cons_ey - adot*cov_du*norm_rz*self.cons_ez
+        if self.rank == 0:
+            utils.progress_bar(i, total, explanation=" ---- ", indexing=True)
+        return du.dot(self.eta)
+
+
     def _MPI_save_xyz(self, suffix="XYZ"):
-        """Saves the 3 dimensional grid."""
         fname_prefix = self._get_fname_prefix()
         fname = fname_prefix + suffix + "_" + str(self.rank) + ".npz"
         if io.isfile(fname) is False:
@@ -1041,63 +826,27 @@ class MIMIC:
             np.savez(fname, Boxsize=self.siminfo["Boxsize"], Ngrid=self.siminfo["Ngrid"],
                 x3D=self.x3D, y3D=self.y3D, z3D=self.z3D)
 
-    def _MPI_save_sub_xyz(self, suffix="sub_XYZ"):
-        """Saves the 3 dimensional grid."""
-        fname_prefix = self._get_fname_prefix()
-        fname = fname_prefix + suffix + "_" + str(self.rank) + ".npz"
-        if io.isfile(fname) is False:
-            check = True
-        else:
-            data = np.load(fname)
-            if data['SubBoxsize'] == self.WF["SubBoxsize"] and data["SubNgrid"] == self.WF["SubNgrid"]:
-                check = False
-            else:
-                check = True
-        if check:
-            self._print_zero(" - Save sub-box XYZ :", fname_prefix+suffix+"_[0-%i].npz" % (self.MPI.size-1))
-            np.savez(fname, SubBoxsize=self.WF["SubBoxsize"], SubNgrid=self.WF["SubNgrid"],
-                sub_x3D=self.sub_x3D, sub_y3D=self.sub_y3D, sub_z3D=self.sub_z3D)
-
-    # Wiener Filtering ---------------------------------------------------------
 
     def _MPI_savez(self, suffix, **kwarg):
-        """Generalised MPI save function, in npz format."""
         fname_prefix = self._get_fname_prefix()
         fname = fname_prefix + suffix + "_" + str(self.rank) + ".npz"
         self._print_zero(" - Saving to :", fname_prefix+suffix+"_[0-%i].npz" % (self.MPI.size-1))
         np.savez(fname, **kwarg)
 
 
-    def _save_WF(self, field, WF):
-        """Saves the WF field."""
+    def save_WF(self, dens_WF):
         self._MPI_save_xyz()
-        suffix = "WF_" + field
-        self._MPI_savez(suffix, WF=WF)
+        suffix = "WF"
+        self._MPI_savez(suffix, dens=dens_WF)
 
 
-    def _save_WF_err(self, field, WF_err):
-        """Saves the WF field variance."""
+    def save_err_WF(self, dens_err_WF):
         self._MPI_save_xyz()
-        suffix = "WF_"+ field + "_err"
-        self._MPI_savez(suffix, WF_err=WF_err)
-
-
-    def _save_sub_WF(self, field, sub_WF):
-        """Saves the WF subbox field."""
-        self._MPI_save_sub_xyz()
-        suffix = "sub_WF_" + field
-        self._MPI_savez(suffix, sub_WF=sub_WF)
-
-
-    def _save_sub_WF_err(self, field, sub_WF_err):
-        """Saves the WF subbox field variance."""
-        self._MPI_save_sub_xyz()
-        suffix = "sub_WF_"+ field + "_err"
-        self._MPI_savez(suffix, sub_WF_err=sub_WF_err)
+        suffix = "WF_err"
+        self._MPI_savez(suffix, err=dens_err_WF)
 
 
     def get_WF(self):
-        """Computes the WF reconstruction"""
         self._print_zero()
         self._print_zero(" Compute Wiener Filter")
         self._print_zero(" =====================")
@@ -1107,303 +856,51 @@ class MIMIC:
         self.flatten_grid3D()
 
         self._print_zero()
+        self._print_zero(" - Computing Wiener Filter density")
 
         prefix = " ---- "
 
-        if self.WF["Field"] == "dens":
-            self._print_zero(" - Computing Wiener Filter density")
-            typei = 0
-            exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-        elif self.WF["Field"] == "phi_x":
-            self._print_zero(" - Computing Wiener Filter displacment in x")
-            typei = 1
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "phi_y":
-            self._print_zero(" - Computing Wiener Filter displacment in y")
-            typei = 1
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "phi_z":
-            self._print_zero(" - Computing Wiener Filter displacment in z")
-            typei = 1
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "phi_r":
-            self._print_zero(" - Computing Wiener Filter displacment in r")
-            typei = 1
-            exi = self.x3D - self.halfsize
-            eyi = self.y3D - self.halfsize
-            ezi = self.z3D - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-        elif self.WF["Field"] == "vel_x":
-            self._print_zero(" - Computing Wiener Filter velocity in x")
-            typei = 2
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "vel_y":
-            self._print_zero(" - Computing Wiener Filter velocity in y")
-            typei = 2
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "vel_z":
-            self._print_zero(" - Computing Wiener Filter velocity in z")
-            typei = 2
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "vel_r":
-            self._print_zero(" - Computing Wiener Filter velocity in r")
-            typei = 1
-            exi = self.x3D - self.halfsize
-            eyi = self.y3D - self.halfsize
-            ezi = self.z3D - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
+        typei = 0
+        exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
 
-        if self.what2run["WF"]:
-            WF = theory.get_corr_dot_eta_fast(self.x3D, self.cons_x, self.y3D, self.cons_y,
-                self.z3D, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
-                typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
-                self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
-                self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
-                self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
-                mpi_rank=self.MPI.rank, minlogr=-2)
+        dens_WF = theory.get_corr_dot_eta_fast(self.x3D, self.cons_x, self.y3D, self.cons_y,
+            self.z3D, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
+            typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
+            self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
+            self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
+            self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
+            mpi_rank=self.MPI.rank, minlogr=-2)
 
-        if self.what2run["WF_Error"]:
-            self._print_zero()
-
-            if self.WF["Field"] == "dens":
-                self._print_zero(" - Computing Wiener Filter variance in density")
-                typei = 0
-                exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-            elif self.WF["Field"] == "phi_x":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in x")
-                typei = 1
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "phi_y":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in y")
-                typei = 1
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "phi_z":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in z")
-                typei = 1
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "phi_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 1
-                exi = self.x3D - self.halfsize
-                eyi = self.y3D - self.halfsize
-                ezi = self.z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-            elif self.WF["Field"] == "vel_x":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in x")
-                typei = 2
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "vel_y":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in y")
-                typei = 2
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "vel_z":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in z")
-                typei = 2
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "vel_r":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in r")
-                typei = 1
-                exi = self.x3D - self.halfsize
-                eyi = self.y3D - self.halfsize
-                ezi = self.z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-
-            WF_err = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, eyi, eyi,
-                ezi, ezi, typei, typei, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-                self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-                self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-                minlogr=-2)
-
-            WF_err -= theory.get_corr1_dot_inv_dot_corr2_fast(self.x3D, np.copy(self.x3D), self.cons_x,
-                self.y3D, np.copy(self.y3D), self.cons_y, self.z3D, np.copy(self.z3D), self.cons_z,
-                exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
-                self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
-                self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
-                self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
-                len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
+        # self._print_zero()
+        # self._print_zero(" - Computing Wiener Filter density error")
+        #
+        # dens_err_WF = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, exi, exi,
+        #     exi, exi, 0, 0, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
+        #     self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
+        #     self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
+        #     minlogr=-2)
+        #
+        # dens_err_WF -= theory.get_corr1_dot_inv_dot_corr2_fast(self.x3D, np.copy(self.x3D), self.cons_x,
+        #     self.y3D, np.copy(self.y3D), self.cons_y, self.z3D, np.copy(self.z3D), self.cons_z,
+        #     exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
+        #     self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
+        #     self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
+        #     self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
+        #     len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
 
         self.unflatten_grid3D()
-
-        if self.what2run["WF"]:
-            WF = WF.reshape(self.x_shape)
-            self._save_WF(self.WF["Field"], WF)
-
-        if self.what2run["WF_Error"]:
-            WF_err = WF_err.reshape(self.x_shape)
-            self._save_WF_err(self.WF["Field"], WF_err)
+        dens_WF = dens_WF.reshape(self.x_shape)
+        #dens_err_WF = dens_err_WF.reshape(self.x_shape)
 
         self._print_zero()
+        self.save_WF(dens_WF)
+        #self.save_err_WF(dens_err_WF)
 
         if self.what2run["RZA"]:
-            self.dens_WF = WF
+            self.dens_WF = dens_WF
 
-
-    def get_sub_WF(self):
-        """Computes the sub-box WF reconstruction"""
-        self._print_zero()
-        self._print_zero(" Compute Sub-Box Wiener Filter")
-        self._print_zero(" =============================")
-        self._print_zero()
-
-        self.get_subgrid3D()
-        self.flatten_subgrid3D()
-
-        self._print_zero()
-
-        prefix = " ---- "
-
-        if self.WF["Field"] == "dens":
-            self._print_zero(" - Computing Wiener Filter density")
-            typei = 0
-            exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-        elif self.WF["Field"] == "phi_x":
-            self._print_zero(" - Computing Wiener Filter displacment in x")
-            typei = 1
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "phi_y":
-            self._print_zero(" - Computing Wiener Filter displacment in y")
-            typei = 1
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "phi_z":
-            self._print_zero(" - Computing Wiener Filter displacment in z")
-            typei = 1
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "phi_r":
-            self._print_zero(" - Computing Wiener Filter displacment in r")
-            typei = 1
-            exi = self.sub_x3D - self.halfsize
-            eyi = self.sub_y3D - self.halfsize
-            ezi = self.sub_z3D - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-        elif self.WF["Field"] == "vel_x":
-            self._print_zero(" - Computing Wiener Filter velocity in x")
-            typei = 2
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "vel_y":
-            self._print_zero(" - Computing Wiener Filter velocity in y")
-            typei = 2
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "vel_z":
-            self._print_zero(" - Computing Wiener Filter velocity in z")
-            typei = 2
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "vel_r":
-            self._print_zero(" - Computing Wiener Filter velocity in r")
-            typei = 2
-            exi = self.sub_x3D - self.halfsize
-            eyi = self.sub_y3D - self.halfsize
-            ezi = self.sub_z3D - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-
-        if self.what2run["WF_SubBox"]:
-            WF = theory.get_corr_dot_eta_fast(self.sub_x3D, self.cons_x, self.sub_y3D, self.cons_y,
-                self.sub_z3D, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
-                typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
-                self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
-                self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
-                self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
-                mpi_rank=self.MPI.rank, minlogr=-2)
-
-        if self.what2run["WF_Error"]:
-            self._print_zero()
-
-            if self.WF["Field"] == "dens":
-                self._print_zero(" - Computing Wiener Filter variance in density")
-                typei = 0
-                exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-            elif self.WF["Field"] == "phi_x":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in x")
-                typei = 1
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "phi_y":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in y")
-                typei = 1
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "phi_z":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in z")
-                typei = 1
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "phi_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 1
-                exi = self.sub_x3D - self.halfsize
-                eyi = self.sub_y3D - self.halfsize
-                ezi = self.sub_z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-            elif self.WF["Field"] == "vel_x":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in x")
-                typei = 2
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "vel_y":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in y")
-                typei = 2
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "vel_z":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in z")
-                typei = 2
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "vel_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 2
-                exi = self.sub_x3D - self.halfsize
-                eyi = self.sub_y3D - self.halfsize
-                ezi = self.sub_z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-
-            WF_err = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, eyi, eyi,
-                ezi, ezi, typei, typei, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-                self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-                self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-                minlogr=-2)
-
-            WF_err -= theory.get_corr1_dot_inv_dot_corr2_fast(self.sub_x3D, np.copy(self.sub_x3D), self.cons_x,
-                self.sub_y3D, np.copy(self.sub_y3D), self.cons_y, self.sub_z3D, np.copy(self.sub_z3D), self.cons_z,
-                exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
-                self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
-                self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
-                self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
-                len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
-
-        self.unflatten_subgrid3D()
-
-        if self.what2run["WF_SubBox"]:
-            WF = WF.reshape(self.sub_x_shape)
-            self._save_sub_WF(self.WF["Field"], WF)
-
-        if self.what2run["WF_Error"]:
-            WF_err = WF_err.reshape(self.sub_x_shape)
-            self._save_sub_WF_err(self.WF["Field"], WF_err)
-
-        self._print_zero()
-
-    # FFT related functions ----------------------------------------------------
 
     def start_FFT(self, Ngrid):
-        """Start mpi4py-fft object."""
         if self.FFT is None or self.FFT_Ngrid != Ngrid:
             self.FFT_Ngrid = Ngrid
             Ngrids = np.array([Ngrid, Ngrid, Ngrid], dtype=int)
@@ -1411,15 +908,10 @@ class MIMIC:
 
 
     def complex_zeros(self, shape):
-        """Construct complex zeros."""
         return np.zeros(shape) + 1j*np.zeros(shape)
 
 
-    # Density to displacement/velocity functions -------------------------------
-
     def dens2psi(self, dens):
-        """Conversion from density to displacement fields along each cartesian
-        axes."""
         self.start_FFT(self.siminfo["Ngrid"])
         self.get_grid3D()
         self.get_kgrid3D()
@@ -1443,8 +935,6 @@ class MIMIC:
 
 
     def psi2vel(self, redshift, psi_x, psi_y, psi_z):
-        """Conversion from displacement to velocity fields along each cartesian
-        axes."""
         z0 = redshift
         Hz = self.interp_Hz(z0)
 
@@ -1483,11 +973,8 @@ class MIMIC:
 
         return vel_x, vel_y, vel_z
 
-    # Including buffer regions for distributed grids ---------------------------
 
     def _add_buffer_in_x(self, f):
-        """Add buffer regions along the x-axes which is the axes in which
-        parallelisation is performed."""
         f_send_down = self.MPI.send_down(f[0])
         f_send_up = self.MPI.send_up(f[-1])
         fnew = np.concatenate([np.array([f_send_up]), f, np.array([f_send_down])])
@@ -1495,7 +982,6 @@ class MIMIC:
 
 
     def _get_buffer_range(self):
-        """Returns the buffer region range."""
         dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
         xmin = np.min(self.x3D) - dx/2. - dx
         xmax = np.max(self.x3D) + dx/2. + dx
@@ -1503,14 +989,11 @@ class MIMIC:
 
 
     def _unbuffer_in_x(self, f):
-        """Removes buffer regions."""
         fnew = f[1:-1]
         return fnew
 
-    # Apply the Reverse Zel'dovich approximation -------------------------------
 
     def get_RZA(self):
-        """Apply the reverse Zel'dovich approximation."""
         self._print_zero()
         self._print_zero(" Apply Reverse Zeldovich Approximation")
         self._print_zero(" =====================================")
@@ -1572,7 +1055,7 @@ class MIMIC:
         self._print_zero(" - Applying RZA")
         self._print_zero()
 
-        if self.RZA["Method"] == 2:
+        if self.constraints["RZA_Method"] == 2:
             # This assumes Method II of https://theses.hal.science/tel-01127294/document see page 121
             cons_rza_x = cons_x - cons_psi_x
             cons_rza_y = cons_y - cons_psi_y
@@ -1583,7 +1066,7 @@ class MIMIC:
             cons_rza_c = np.copy(cons_c)
             cons_rza_c_err = np.copy(cons_c_err)
 
-        # elif self.RZA["Method"] == 3:
+        # elif self.constraints["RZA_Method"] == 3:
         #     # See above paper for Method III
         #     cons_rza_x = cons_x - cons_psi_x
         #     cons_rza_y = cons_y - cons_psi_y
@@ -1629,23 +1112,18 @@ class MIMIC:
                 ez=self.cons_ez, c=self.cons_c, c_err=self.cons_c_err)
 
 
-    # Random realisations ------------------------------------------------------
-
     def save_WN(self, WN):
-        """Saves the whitenoise fields."""
         self._MPI_save_xyz()
         suffix = "WN"
         self._MPI_savez(suffix, WN=WN)
 
 
     def save_dens(self, suffix):
-        """Save density field."""
         self._MPI_save_xyz()
         self._MPI_savez(suffix, dens=self.dens)
 
 
     def get_RR(self):
-        """Produces a random Gaussian field."""
         self._print_zero()
         self._print_zero(" Construct Random Realisation")
         self._print_zero(" ============================")
@@ -1698,18 +1176,6 @@ class MIMIC:
 
 
     def dens_at_z(self, dens, redshift, redshift_current=0.):
-        """Scales a density with the growth function from a current redshift to
-        some desired redshift.
-
-        Parameters
-        ----------
-        dens : array
-            Density on a grid.
-        redshift : float
-            Desired redshift.
-        redshift_current : float
-            Current redshift of the density input.
-        """
         z0 = redshift
         z1 = redshift_current
         if self.cosmo["ScaleDepGrowth"]:
@@ -1732,7 +1198,6 @@ class MIMIC:
 
 
     def compute_eta_CR(self):
-        """Computes the eta vector for a constrained realisation."""
         self._print_zero()
         self._print_zero(" Compute eta_CR-vector")
         self._print_zero(" =====================")
@@ -1776,8 +1241,22 @@ class MIMIC:
         self.eta_CR = self.MPI.broadcast(self.eta_CR)
 
 
+    def _get_CR_single(self, x, y, z, adot, i, total):
+        rx = self.cons_x - x
+        ry = self.cons_y - y
+        rz = self.cons_z - z
+        r = np.sqrt(rx**2. + ry**2. + rz**2.)
+        norm_rx = np.copy(rx)/r
+        norm_ry = np.copy(ry)/r
+        norm_rz = np.copy(rz)/r
+        cov_du = self.interp_zeta_u(r)
+        du = - adot*cov_du*norm_rx*self.cons_ex - adot*cov_du*norm_ry*self.cons_ey - adot*cov_du*norm_rz*self.cons_ez
+        if self.rank == 0:
+            utils.progress_bar(i, total, explanation=" ---- ", indexing=True)
+        return du.dot(self.eta_CR)
+
+
     def prep_CR(self):
-        """Prepares theory, etc for constrained realisation calculation."""
         self._print_zero()
         self._print_zero(" Prepare for Constrained Realisation")
         self._print_zero(" ===================================")
@@ -1856,7 +1335,6 @@ class MIMIC:
 
 
     def get_CR(self):
-        """Computes a constrained realisation field."""
         self._print_zero()
         self._print_zero(" Construct Constrained Realisation")
         self._print_zero(" =================================")
@@ -1897,10 +1375,7 @@ class MIMIC:
         self._print_zero()
         self.save_dens("CR")
 
-    # Initial condition functions ----------------------------------------------
-
     def get_particle_mass(self):
-        """Determines the particle mass."""
         G_const = 6.6743e-11
         part_mass = 3.*self.cosmo["Omega_m"]*self.siminfo["Boxsize"]**3.
         part_mass /= 8.*np.pi*G_const*self.siminfo["Ngrid"]**3.
@@ -1910,7 +1385,6 @@ class MIMIC:
 
 
     def get_IC(self):
-        """Produces initial conditions."""
         self._print_zero()
         self._print_zero(" Generate Initial Conditions")
         self._print_zero(" ===========================")
@@ -1990,8 +1464,6 @@ class MIMIC:
         io.save_gadget(fname, header, pos, vel, ic_format=2, single=True, id_offset=part_id_offsets[self.rank])
 
 
-    # Main pipeline running ----------------------------------------------------
-
     def run(self, yaml_fname):
         """Run MIMIC."""
         self.start()
@@ -1999,18 +1471,13 @@ class MIMIC:
         # Theory
         self.time["Prep_Start"] = time.time()
         self.prep()
-        self.compute_cov()
+        self.compute_eta()
         self.time["Prep_End"] = time.time()
 
         if self.what2run["WF"]:
             self.time["WF_Start"] = time.time()
             self.get_WF()
             self.time["WF_End"] = time.time()
-
-        if self.what2run["WF_SubBox"]:
-            self.time["WF_Sub_Start"] = time.time()
-            self.get_sub_WF()
-            self.time["WF_Sub_End"] = time.time()
 
         if self.what2run["RZA"]:
             self.time["RZA_Start"] = time.time()
@@ -2068,7 +1535,6 @@ class MIMIC:
 
         Prep_str = " -> Theory Calculations       = "
         WF___str = " -> Wiener Filter             = "
-        SuWF_str = " -> SubBox Wiener Filter      = "
         RZA__str = " -> Reverse Zeldovich         = "
         RR___str = " -> Random Realisation        = "
         PCR__str = " -> CR Preprocessing          = "
@@ -2080,9 +1546,6 @@ class MIMIC:
 
         if self.what2run["WF"]:
             self._print_time(WF___str, self.time["WF_End"] - self.time["WF_Start"])
-
-        if self.what2run["WF_SubBox"]:
-            self._print_time(SuWF_str, self.time["WF_Sub_End"] - self.time["WF_Sub_Start"])
 
         if self.what2run["RZA"]:
             self._print_time(RZA__str, self.time["RZA_End"] - self.time["RZA_Start"])

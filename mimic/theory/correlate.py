@@ -313,7 +313,7 @@ def get_corr_dot_eta_fast(x1, xc, y1, yc, z1, zc, ex1, exc, ey1, eyc, ez1, ezc,
         Coordinates of point 1.
     xc, yc, zc : array
         Coordinates of point c.
-    ex1, ey1, ez1 : array
+    ex1, ey1, ez1 : float/array
         Directional vector for point 1 constraints or desired constraints.
     exc, eyc, ezc : array
         Directional vector for point c constraints or desired constraints.
@@ -373,21 +373,33 @@ def get_corr_dot_eta_fast(x1, xc, y1, yc, z1, zc, ex1, exc, ey1, eyc, ez1, ezc,
     _shapec = np.shape(xc)
     x1, y1, z1 = x1.flatten(), y1.flatten(), z1.flatten()
     xc, yc, zc = xc.flatten(), yc.flatten(), zc.flatten()
+    if isscalar(ex1) is not True:
+        ex1, ey1, ez1 = ex1.flatten(), ey1.flatten(), ez1.flatten()
     exc, eyc, ezc = exc.flatten(), eyc.flatten(), ezc.flatten()
     typec = typec.flatten()
 
     adot_phi = _get_adot_phi(redshift)
     adot_vel = _get_adot_vel(redshift, interp_Hz)
 
-    field = src.corr_dot_eta(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
-        ey1=ey1, eyc=eyc, ez1=ez1, ezc=ezc, type1=type1, typec=typec, adot_phi=adot_phi,
-        adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
-        psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
-        boxsize=boxsize, lenr=len(_r), lenx1=len(x1), lenxc=len(xc), eta=eta, mpi_rank=mpi_rank,
-        lenpro=lenpro, lenpre=lenpre, prefix=prefix)
+    if isscalar(ex1):
+        field = src.corr_dot_eta(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
+            ey1=ey1, eyc=eyc, ez1=ez1, ezc=ezc, type1=type1, typec=typec, adot_phi=adot_phi,
+            adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
+            psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
+            boxsize=boxsize, lenr=len(_r), lenx1=len(x1), lenxc=len(xc), eta=eta, mpi_rank=mpi_rank,
+            lenpro=lenpro, lenpre=lenpre, prefix=prefix)
+    else:
+        field = src.corr_dot_eta_array(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
+            ey1=ey1, eyc=eyc, ez1=ez1, ezc=ezc, type1=type1, typec=typec, adot_phi=adot_phi,
+            adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
+            psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
+            boxsize=boxsize, lenr=len(_r), lenx1=len(x1), lenxc=len(xc), eta=eta, mpi_rank=mpi_rank,
+            lenpro=lenpro, lenpre=lenpre, prefix=prefix)
 
     x1, y1, z1 = x1.reshape(_shape1), y1.reshape(_shape1), z1.reshape(_shape1)
     xc, yc, zc = xc.reshape(_shapec), yc.reshape(_shapec), zc.reshape(_shapec)
+    if isscalar(ex1) is not True:
+        ex1, ey1, ez1 = ex1.reshape(_shape1), ey1.reshape(_shape1), ez1.reshape(_shape1)
     exc, eyc, ezc = exc.reshape(_shapec), eyc.reshape(_shapec), ezc.reshape(_shapec)
     typec = typec.reshape(_shapec)
     field = field.reshape(_shape1)
@@ -475,23 +487,36 @@ def get_corr1_dot_inv_dot_corr2_fast(x1, x2, xc, y1, y2, yc, z1, z2, zc, exi, ex
     x1, y1, z1 = x1.flatten(), y1.flatten(), z1.flatten()
     x2, y2, z2 = x2.flatten(), y2.flatten(), z2.flatten()
     xc, yc, zc = xc.flatten(), yc.flatten(), zc.flatten()
+    if isscalar(exi) is not True:
+        exi, eyi, ezi = exi.flatten(), eyi.flatten(), ezi.flatten()
     exc, eyc, ezc = exc.flatten(), eyc.flatten(), ezc.flatten()
     typec = typec.flatten()
 
     adot_phi = _get_adot_phi(redshift)
     adot_vel = _get_adot_vel(redshift, interp_Hz)
 
-    field = src.corr1_dot_inv_dot_corr2(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
-        exi=exi, eyi=eyi, ezi=ezi, xc=xc, yc=yc, zc=zc, exc=exc, eyc=eyc, ezc=ezc,
-        type1=type1, type2=type2, typec=typec, adot_phi=adot_phi, adot_vel=adot_vel,
-        logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp, psit_pp=psiT_pp,
-        psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
-        boxsize=boxsize, lenr=len(_r), lenxi=len(x1), lenxc=len(xc), inv=inv.flatten(),
-        mpi_rank=mpi_rank, lenpro=lenpro, lenpre=lenpre, prefix=prefix)
+    if isscalar(exi):
+        field = src.corr1_dot_inv_dot_corr2(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
+            exi=exi, eyi=eyi, ezi=ezi, xc=xc, yc=yc, zc=zc, exc=exc, eyc=eyc, ezc=ezc,
+            type1=type1, type2=type2, typec=typec, adot_phi=adot_phi, adot_vel=adot_vel,
+            logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp, psit_pp=psiT_pp,
+            psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
+            boxsize=boxsize, lenr=len(_r), lenxi=len(x1), lenxc=len(xc), inv=inv.flatten(),
+            mpi_rank=mpi_rank, lenpro=lenpro, lenpre=lenpre, prefix=prefix)
+    else:
+        field = src.corr1_dot_inv_dot_corr2_array(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
+            exi=exi, eyi=eyi, ezi=ezi, xc=xc, yc=yc, zc=zc, exc=exc, eyc=eyc, ezc=ezc,
+            type1=type1, type2=type2, typec=typec, adot_phi=adot_phi, adot_vel=adot_vel,
+            logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp, psit_pp=psiT_pp,
+            psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
+            boxsize=boxsize, lenr=len(_r), lenxi=len(x1), lenxc=len(xc), inv=inv.flatten(),
+            mpi_rank=mpi_rank, lenpro=lenpro, lenpre=lenpre, prefix=prefix)
 
     x1, y1, z1 = x1.reshape(_shapei), y1.reshape(_shapei), z1.reshape(_shapei)
     x2, y2, z2 = x2.reshape(_shapei), y2.reshape(_shapei), z2.reshape(_shapei)
     xc, yc, zc = xc.reshape(_shapec), yc.reshape(_shapec), zc.reshape(_shapec)
+    if isscalar(exi) is not True:
+        exi, eyi, ezi = exi.reshape(_shapei), eyi.reshape(_shapei), ezi.reshape(_shapei)
     exc, eyc, ezc = exc.reshape(_shapec), eyc.reshape(_shapec), ezc.reshape(_shapec)
     typec = typec.reshape(_shapec)
     field = field.reshape(_shapei)

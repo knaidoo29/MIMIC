@@ -13,7 +13,9 @@ from .fast_correlate import get_cc_array2
 from .fast_correlate import get_cc_arrays
 
 from .fast_correlate_eta import corr_dot_eta
+from .fast_correlate_eta import corr_dot_eta_array
 from .fast_correlate_inv import corr1_dot_inv_dot_corr2
+from .fast_correlate_inv import corr1_dot_inv_dot_corr2_array
 
 from .interp import interp_lin_float
 from .interp import interp_lin_array

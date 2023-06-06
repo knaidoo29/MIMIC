@@ -7,7 +7,6 @@ Cosmology:
   GrowthFile: 'LCDM_growth_scale_indep.npz'
 
 Siminfo:
-  Simname: "CF2"
   Boxsize: 500.
   Ngrid: 32
 
