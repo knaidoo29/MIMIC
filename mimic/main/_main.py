@@ -1107,10 +1107,9 @@ class MIMIC:
         self._print_zero(" - Saving RZA constraints to: %s" % fname)
 
         if self.rank == 0:
-            np.savez(fname, x=self.cons_x-self.halfsize, y=self.cons_y-self.halfsize,
-                z=self.cons_z-self.halfsize, ex=self.cons_ex, ey=self.cons_ey,
-                ez=self.cons_ez, c=self.cons_c, c_err=self.cons_c_err)
-
+            io._save_constraints_npz(fname, self.cons_x-self.halfsize, self.cons_y-self.halfsize,
+                self.cons_z-self.halfsize, self.cons_ex, self.cons_ey, self.cons_ez,
+                self.cons_c, self.cons_c_err, self.cons_c_type)
 
     def save_WN(self, WN):
         self._MPI_save_xyz()

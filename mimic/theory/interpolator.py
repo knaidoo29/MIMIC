@@ -23,11 +23,11 @@ def Dzk_2_Dk_at_z(zval, zarray, karray, Dzk):
     interp_Dk : func
         Interpolatable function for the scale dependent linear growth function.
     """
-    Dk = np.zeros(len(kh))
-    for i in range(0, len(kh)):
-        interp_D = interp1d(z, Dzk[:, i], kind='cubic')
-        Dk[i] = interp_D(redshift)
-    interp_Dk = interp1d(kh, Dk, kind='cubic', bounds_error=False)
+    Dk = np.zeros(len(karray))
+    for i in range(0, len(karray)):
+        interp_D = interp1d(zarray, Dzk[:, i], kind='cubic')
+        Dk[i] = interp_D(zval)
+    interp_Dk = interp1d(karray, Dk, kind='cubic', bounds_error=False)
     return interp_Dk
 
 
@@ -101,11 +101,11 @@ def fzk_2_fk_at_z(zval, zarray, karray, fzk):
     interp_fk : func
         Interpolatable function for the scale dependent linear growth rate.
     """
-    fk = np.zeros(len(kh))
-    for i in range(0, len(kh)):
+    fk = np.zeros(len(karray))
+    for i in range(0, len(karray)):
         interp_f = interp1d(zarray, fzk[:, i], kind='cubic')
         fk[i] = interp_f(zval)
-    interp_fk = interp1d(kh, fk, kind='cubic', bounds_error=False)
+    interp_fk = interp1d(karray, fk, kind='cubic', bounds_error=False)
     return interp_fk
 
 

@@ -113,7 +113,8 @@ class MIMIC:
         self.ICs = {
             "Seed": None,
             "WNFile": None,
-            "z_ic": None
+            "z_ic": None,
+            "gadget_format": None
         }
         self.outputs = {
             "OutputFolder": None,
@@ -390,6 +391,10 @@ class MIMIC:
                 self.what2run["WF_SubBox"] = True
                 self.what2run["WF_Error"] = self.WF["CalcError"]
 
+            else:
+
+                self.what2run["WF"] = True
+
         if self._check_param_key(params, "RZA"):
 
             self._print_zero()
@@ -434,6 +439,9 @@ class MIMIC:
 
             self.ICs["z_ic"] = float(params["ICs"]["z_ic"])
             self._print_zero(" - z_ic \t\t=", self.ICs["z_ic"])
+
+            self.ICs["gadget_format"] = int(params["ICs"]["gadget_format"])
+            self._print_zero(" - gadget_format \t=", self.ICs["gadget_format"])
 
             if self._check_param_key(params["ICs"], "CR"):
                 self.what2run["CR"] = bool(params["ICs"]["CR"])
@@ -505,7 +513,7 @@ class MIMIC:
         self._print_zero(" - Load PowerSpecFile :", self.cosmo["PowerSpecFile"])
         data = np.load(self.cosmo["PowerSpecFile"])
         self.theory_kh, self.theory_pk = data['kh'], data['pk']
-
+        
         self._print_zero(" - Create P(k) interpolator")
         self.kmin, self.kmax = self.theory_kh.min(), self.theory_kh.max()
 
@@ -643,13 +651,25 @@ class MIMIC:
         self._print_zero(" - Compute correlators in parallel")
 
         if self.constraints["klims"]:
+            self.sim_kmin = None
+            self.sim_kmax = None
+
             if self.what2run["WF"] or self.what2run["CR"] or self.what2run["IC"]:
-                self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
-                self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+                #self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
+                #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+                kf = shift.cart.get_kf(self.siminfo["Boxsize"])
+                kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
 
             elif self.what2run["WF_SubBox"]:
-                self.sim_kmin = shift.cart.get_kf(self.WF["SubBoxsize"])
-                self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
+                #self.sim_kmin = shift.cart.get_kf(self.WF["SubBoxsize"])
+                #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
+                kf = shift.cart.get_kf(self.siminfo["Boxsize"])
+                kn = shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
+
+            smallfilter = field.get_lowres_filter(self.theory_kh, kn, k0=None, T=0.1)
+            largefilter = field.get_highres_filter(self.theory_kh, kf, k0=None, T=0.1)
+            self.theory_pk *= smallfilter*largefilter
+
         else:
             self.sim_kmin = None
             self.sim_kmax = None
@@ -1583,20 +1603,20 @@ class MIMIC:
             cons_rza_c = np.copy(cons_c)
             cons_rza_c_err = np.copy(cons_c_err)
 
-        # elif self.RZA["Method"] == 3:
-        #     # See above paper for Method III
-        #     cons_rza_x = cons_x - cons_psi_x
-        #     cons_rza_y = cons_y - cons_psi_y
-        #     cons_rza_z = cons_z - cons_psi_z
-        #     cons_rza_ex = np.copy(cons_ex)
-        #     cons_rza_ey = np.copy(cons_ey)
-        #     cons_rza_ez = np.copy(cons_ez)
-        #     cons_rza_c = np.copy(cons_c)
-        #     cons_rza_c_err = np.zeros(len(cons_c_err))
-        #     cons_rza_c = np.sqrt(cons_rza_x**2. + cons_rza_y**2. + cons_rza_z**2.)
-        #     cons_rza_ex = cons_rza_x / cons_rza_c
-        #     cons_rza_ey = cons_rza_y / cons_rza_c
-        #     cons_rza_ez = cons_rza_z / cons_rza_c
+        elif self.RZA["Method"] == 3:
+            # See above paper for Method III
+            cons_rza_x = cons_x - cons_psi_x
+            cons_rza_y = cons_y - cons_psi_y
+            cons_rza_z = cons_z - cons_psi_z
+            cons_rza_ex = np.copy(cons_ex)
+            cons_rza_ey = np.copy(cons_ey)
+            cons_rza_ez = np.copy(cons_ez)
+            cons_rza_c = np.copy(cons_c)
+            cons_rza_c_err = np.zeros(len(cons_c_err))
+            cons_rza_c = np.sqrt(cons_rza_x**2. + cons_rza_y**2. + cons_rza_z**2.)
+            cons_rza_ex = cons_rza_x / cons_rza_c
+            cons_rza_ey = cons_rza_y / cons_rza_c
+            cons_rza_ez = cons_rza_z / cons_rza_c
 
         self.cons_x = self.MPI.collect_noNone(cons_rza_x)
         self.cons_y = self.MPI.collect_noNone(cons_rza_y)
@@ -1624,10 +1644,9 @@ class MIMIC:
         self._print_zero(" - Saving RZA constraints to: %s" % fname)
 
         if self.rank == 0:
-            np.savez(fname, x=self.cons_x-self.halfsize, y=self.cons_y-self.halfsize,
-                z=self.cons_z-self.halfsize, ex=self.cons_ex, ey=self.cons_ey,
-                ez=self.cons_ez, c=self.cons_c, c_err=self.cons_c_err)
-
+            io._save_constraints_npz(fname, self.cons_x-self.halfsize, self.cons_y-self.halfsize,
+                self.cons_z-self.halfsize, self.cons_ex, self.cons_ey, self.cons_ez,
+                self.cons_c, self.cons_c_err, self.cons_c_type)
 
     # Random realisations ------------------------------------------------------
 
@@ -1987,7 +2006,8 @@ class MIMIC:
         self._print_zero()
         self._print_zero(" - Saving ICs in Gadget format to %s[0-%i]"%(fname[:-1], self.MPI.size-1))
 
-        io.save_gadget(fname, header, pos, vel, ic_format=2, single=True, id_offset=part_id_offsets[self.rank])
+        io.save_gadget(fname, header, pos, vel, ic_format=self.ICs['gadget_format'],
+            single=True, id_offset=part_id_offsets[self.rank])
 
 
     # Main pipeline running ----------------------------------------------------

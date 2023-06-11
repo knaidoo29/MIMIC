@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import expit
 
 
 def get_lowres_filter(k, lowres_k_nyq, k0=None, T=0.1):
@@ -17,7 +18,9 @@ def get_lowres_filter(k, lowres_k_nyq, k0=None, T=0.1):
     """
     if k0 is None:
         k0 = 0.5*lowres_k_nyq
-    return 1./(np.exp((k-k0)/(k0*T)) + 1.)
+    #Below is the scipy implementation of 1./(np.exp((k-k0)/(k0*T)) + 1.), this is
+    #more numerically stable and does not give an error for large values.
+    return expit(-(k-k0)/(k0*T))
 
 
 def get_highres_filter(k, lowres_k_nyq, k0=None, T=0.1):
@@ -36,4 +39,4 @@ def get_highres_filter(k, lowres_k_nyq, k0=None, T=0.1):
     """
     if k0 is None:
         k0 = 0.5*lowres_k_nyq
-    return np.sqrt(1. - get_lowk_filter(k, lowres_k_nyq, k0=k0, T=T)**2.)
+    return np.sqrt(1. - get_lowres_filter(k, lowres_k_nyq, k0=k0, T=T)**2.)
