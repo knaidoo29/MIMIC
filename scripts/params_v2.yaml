@@ -22,11 +22,14 @@ Constraints:
 
 WF:
   Field: 'dens'
+  Mode: 'Full'
   # Field: vel_x, vel_y, vel_z, vel_r
   # Field: phi_x, phi_y, phi_z, phi_r
-  SubBoxsize: 100.
-  SubNgrid: 128
-  CalcError: True
+  # CalcError: False
+  # SubBoxsize: 100.
+  # SubNgrid: 128
+  # CalcSubError: True
+
 
 RZA:
   Method: 2
