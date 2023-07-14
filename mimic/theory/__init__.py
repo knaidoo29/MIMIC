@@ -10,10 +10,6 @@ from .pk2corr import pk2psiR
 from .pk2corr import pk2psiT
 
 # Correlation matrices
-from .corr2mat import get_corr_dd
-from .corr2mat import get_corr_du
-from .corr2mat import get_corr_uu
-
 from .correlate import _get_adot_phi
 from .correlate import _get_adot_vel
 from .correlate import get_cc_float_fast
