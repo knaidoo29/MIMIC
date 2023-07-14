@@ -3,7 +3,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 from scipy.integrate import simps
 
-from . import basics
+from . import Hz
 from . import expansion
 
 
@@ -116,7 +116,7 @@ def get_num_fz(redshifts, Dz, **kwargs):
         Dz = np.copy(Dz[::-1])
     else:
         usereverse = False
-    a = basics.z2a(redshifts)
+    a = Hz.z2a(redshifts)
     loga = np.log(a)
     logD = np.log(Dz)
     fz = num_diff(loga, logD, **kwargs)
