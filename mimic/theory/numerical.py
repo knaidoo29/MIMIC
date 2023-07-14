@@ -4,7 +4,6 @@ from scipy.interpolate import interp1d
 from scipy.integrate import simps
 
 from . import Hz
-from . import expansion
 
 
 def num_diff(x, f, equal_spacing=False, interpgrid=1000, kind='cubic'):
