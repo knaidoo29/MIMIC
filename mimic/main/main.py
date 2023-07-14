@@ -1458,7 +1458,6 @@ class MIMIC:
                 vel_x, vel_y, vel_z = self.psi2vel(z0, psi_x, psi_y, psi_z)
                 self._MPI_savez('WF_dens2vel', vel_x=vel_x, vel_y=vel_y, vel_z=vel_z)
 
-
         if self.what2run["RZA"]:
             self.dens_WF = WF
 
@@ -1620,7 +1619,6 @@ class MIMIC:
         self._print_zero(" Compute Constraint Wiener Filter")
         self._print_zero(" ================================")
         self._print_zero()
-
 
         self._print_zero(" Split constrained position points across processors")
 
@@ -1882,6 +1880,11 @@ class MIMIC:
 
         self._print_zero(" - Converting WF density to displacement Psi")
         self._print_zero()
+
+        if self.dens_WF is None:
+            self.ERROR = True
+        io._error_message(self.ERROR, "dens_WF is None, thus cannot compute RZA from this.")
+        self._break4error()
 
         psi_x, psi_y, psi_z = self.dens2psi(self.dens_WF)
 
