@@ -1086,7 +1086,7 @@ class MIMIC:
 
         self.cov = self.MPI.collect(_cov)
         self.cov = self.MPI.broadcast(self.cov)
-        self.cov += np.diag(self.cons_c_err**2.)
+        self.cov = self.cov + np.diag(self.cons_c_err**2.)
 
         if self.constraints["CovOptimise"]:
             self._cov_opt()
@@ -1103,7 +1103,7 @@ class MIMIC:
             cond = np.where(self.cons_c_type == 2)[0]
             sigma_NL[cond] = self.constraints["vel_Sigma_NL"]
 
-            self.cov += np.diag(sigma_NL**2)
+            self.cov = self.cov + np.diag(sigma_NL**2)
 
             self._save_cov()
 
