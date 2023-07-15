@@ -1889,8 +1889,6 @@ class MIMIC:
 
         psi_x, psi_y, psi_z = self.dens2psi(self.dens_WF)
 
-        self.MPI.mpi_print('CHECK', np.shape(psi_x), np.shape(psi_y), np.shape(psi_z), np.shape(self.x3D))
-        
         self._print_zero(" - Add buffer region to Psi for interpolation")
         psi_x = self._add_buffer_in_x(psi_x)
         psi_y = self._add_buffer_in_x(psi_y)

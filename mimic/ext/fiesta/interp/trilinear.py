@@ -31,6 +31,7 @@ def trilinear(fgrid, boxsize, x, y, z, origin=0., fill_value=np.nan, periodic=Tr
     """
     # determine ngrid from fgrid
     ngrids = np.shape(fgrid)
+    print('C', np.shape(fgrid), ngrids, np.shape(fgrid.flatten()), ngrids[0]*ngrids[1]*ngrids[2])
     if np.isscalar(boxsize):
         xbox = boxsize
         ybox = boxsize
