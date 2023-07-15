@@ -709,7 +709,7 @@ class MIMIC:
         self._print_zero(" - Prepare Constraints")
         # Normalise direction
         self._print_zero(" -- Normalize velocity unit vector")
-        norm = np.sqrt(self.cons_ex**2. + self.cons_ey**2. + self.cons_ez**2.)
+        norm = (self.cons_ex**2. + self.cons_ey**2. + self.cons_ez**2.)**0.5
         self.cons_ex /= norm
         self.cons_ey /= norm
         self.cons_ez /= norm
