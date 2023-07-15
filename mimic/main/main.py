@@ -2105,37 +2105,37 @@ class MIMIC:
         self._print_zero(" =====================")
         self._print_zero()
 
-        x1, x2 = self.MPI.create_split_ndgrid([self.cons_x, self.cons_x], [False, True])
-        y1, y2 = self.MPI.create_split_ndgrid([self.cons_y, self.cons_y], [False, True])
-        z1, z2 = self.MPI.create_split_ndgrid([self.cons_z, self.cons_z], [False, True])
+        # x1, x2 = self.MPI.create_split_ndgrid([self.cons_x, self.cons_x], [False, True])
+        # y1, y2 = self.MPI.create_split_ndgrid([self.cons_y, self.cons_y], [False, True])
+        # z1, z2 = self.MPI.create_split_ndgrid([self.cons_z, self.cons_z], [False, True])
+        #
+        # ex1, ex2 = self.MPI.create_split_ndgrid([self.cons_ex, self.cons_ex], [False, True])
+        # ey1, ey2 = self.MPI.create_split_ndgrid([self.cons_ey, self.cons_ey], [False, True])
+        # ez1, ez2 = self.MPI.create_split_ndgrid([self.cons_ez, self.cons_ez], [False, True])
+        #
+        # type1, type2 = self.MPI.create_split_ndgrid([self.cons_c_type, self.cons_c_type], [False, True])
+        #
+        # self._print_zero(" - Compute vel-vel covariance matrix in parallel")
+        #
+        # cov_cc = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+        #     type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
+        #     self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
+        #     self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
+        #     minlogr=-2)
+        #
+        # self._print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
+        #
+        # cov_cc = self.MPI.collect(cov_cc)
+        #
+        # if self.rank == 0:
+        #     cov_cc = cov_cc + np.diag(self.cons_c_err**2.)
+        #     # add sigma_NL more error?
+        #
+        #     self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
+        #     inv_cc = np.linalg.inv(cov_cc)
 
-        ex1, ex2 = self.MPI.create_split_ndgrid([self.cons_ex, self.cons_ex], [False, True])
-        ey1, ey2 = self.MPI.create_split_ndgrid([self.cons_ey, self.cons_ey], [False, True])
-        ez1, ez2 = self.MPI.create_split_ndgrid([self.cons_ez, self.cons_ez], [False, True])
-
-        type1, type2 = self.MPI.create_split_ndgrid([self.cons_c_type, self.cons_c_type], [False, True])
-
-        self._print_zero(" - Compute vel-vel covariance matrix in parallel")
-
-        cov_cc = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-            type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-            self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-            self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-            minlogr=-2)
-
-        self._print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
-
-        cov_cc = self.MPI.collect(cov_cc)
-
-        if self.rank == 0:
-            cov_cc = cov_cc + np.diag(self.cons_c_err**2.)
-            # add sigma_NL more error?
-
-            self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
-            inv_cc = np.linalg.inv(cov_cc)
-
-            self._print_zero(" - Compute eta_CR vector [at MPI.rank = 0]")
-            self.eta_CR = inv_cc.dot(self.cons_c - self.cons_c_RR)
+        self._print_zero(" - Compute eta_CR vector [at MPI.rank = 0]")
+        self.eta_CR = self.inv.dot(self.cons_c - self.cons_c_RR)
 
         self.MPI.wait()
 
@@ -2218,6 +2218,8 @@ class MIMIC:
         self._check_constraints()
 
         self.MPI.wait()
+
+        self.compute_cov()
 
         self.compute_eta_CR()
 
