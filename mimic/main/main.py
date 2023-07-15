@@ -2369,11 +2369,11 @@ class MIMIC:
         # Theory
         self.time["Prep_Start"] = time.time()
         self.prep()
-        self.compute_cov()
         self.time["Prep_End"] = time.time()
 
         if self.what2run["WF"]:
             self.time["WF_Start"] = time.time()
+            self.compute_cov()
             self.get_WF()
             self.time["WF_End"] = time.time()
 
