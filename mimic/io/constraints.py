@@ -84,7 +84,7 @@ def _load_constraints_npz(fname):
     ERROR = error._error_if_false(check.isfile(fname))
     error._error_message(ERROR, "File %s does not exist"%fname)
     error._break4error(ERROR)
-    data = np.load(fname)
+    data = np.load(fname, allow_pickle=True)
     x, y, z = data['x'], data['y'], data['z']
     ex, ey, ez = data['ex'], data['ey'], data['ez']
     c, c_err, c_type = data['c'], data['c_err'], data['c_type'].astype('int')
