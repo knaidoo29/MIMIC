@@ -1766,10 +1766,11 @@ class MIMIC:
 
     def start_FFT(self, Ngrid):
         """Start mpi4py-fft object."""
-        if self.FFT is None or self.FFT_Ngrid != Ngrid:
-            self.FFT_Ngrid = Ngrid
-            Ngrids = np.array([Ngrid, Ngrid, Ngrid], dtype=int)
-            self.FFT = self.MPI.mpi_fft_start(Ngrids)
+        # if self.FFT is None or self.FFT_Ngrid != Ngrid:
+        #     self.FFT_Ngrid = Ngrid
+        #     Ngrids = np.array([Ngrid, Ngrid, Ngrid], dtype=int)
+        #     self.FFT = self.MPI.mpi_fft_start(Ngrids)
+        pass
 
 
     def complex_zeros(self, shape):
@@ -1787,7 +1788,7 @@ class MIMIC:
         self.get_kgrid3D()
         kmag = self.get_kgrid_mag()
         densk = shift.cart.mpi_fft3D(dens, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.FFT)
+            self.siminfo["Ngrid"], self.MPI)
         psi_kx = self.complex_zeros(self.k_shape)
         psi_ky = self.complex_zeros(self.k_shape)
         psi_kz = self.complex_zeros(self.k_shape)
@@ -1796,11 +1797,11 @@ class MIMIC:
         psi_ky[cond] = densk[cond] * 1j * self.ky3D[cond]/(kmag[cond]**2.)
         psi_kz[cond] = densk[cond] * 1j * self.kz3D[cond]/(kmag[cond]**2.)
         psi_x = shift.cart.mpi_ifft3D(psi_kx, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.FFT)
+            self.siminfo["Ngrid"], self.MPI)
         psi_y = shift.cart.mpi_ifft3D(psi_ky, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.FFT)
+            self.siminfo["Ngrid"], self.MPI)
         psi_z = shift.cart.mpi_ifft3D(psi_kz, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.FFT)
+            self.siminfo["Ngrid"], self.MPI)
         return psi_x, psi_y, psi_z
 
 
@@ -1818,11 +1819,11 @@ class MIMIC:
             kmag = self.get_kgrid_mag()
 
             vel_kx = shift.cart.mpi_fft3D(psi_x, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
             vel_ky = shift.cart.mpi_fft3D(psi_y, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
             vel_kz = shift.cart.mpi_fft3D(psi_z, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
 
             cond = np.where(kmag != 0.)
             fk = self._get_growth_f(z0, kmag=kmag[cond])
@@ -1831,11 +1832,11 @@ class MIMIC:
             vel_kz[cond] *= adot*fk
 
             vel_x = shift.cart.mpi_ifft3D(vel_kx, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
             vel_y = shift.cart.mpi_ifft3D(vel_ky, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
             vel_z = shift.cart.mpi_ifft3D(vel_kz, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
 
         else:
             fz = self._get_growth_f(z0)
@@ -2048,7 +2049,7 @@ class MIMIC:
         self._print_zero(" - FFT white noise field")
 
         WN_k = shift.cart.mpi_fft3D(WN, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.FFT)
+            self.siminfo["Ngrid"], self.MPI)
 
         self._print_zero(" - Colour white noise field to get density field")
 
@@ -2058,7 +2059,7 @@ class MIMIC:
         self._print_zero(" - iFFT density field")
 
         self.dens = shift.cart.mpi_ifft3D(dens_RR_k, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.FFT)
+            self.siminfo["Ngrid"], self.MPI)
 
         self.save_dens("RR")
 
@@ -2083,13 +2084,13 @@ class MIMIC:
             self.get_kgrid3D()
             kmag = self.get_kgrid_mag()
             dens_k = shift.cart.mpi_fft3D(dens, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
             cond = np.where(kmag != 0.)
             Dk = self._get_growth_D(z0, kmag=kmag[cond])
             Dk0 = self._get_growth_D(z1, kmag=kmag[cond])
             dens_k[cond] = (Dk/Dk0)*dens_k[cond]
             densz = shift.cart.mpi_ifft3D(dens_k, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.FFT)
+                self.siminfo["Ngrid"], self.MPI)
         else:
             Dz = self._get_growth_D(z0)
             Dz0 = self._get_growth_D(z1)
