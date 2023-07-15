@@ -2128,7 +2128,7 @@ class MIMIC:
         cov_cc = self.MPI.collect(cov_cc)
 
         if self.rank == 0:
-            cov_cc += np.diag(self.cons_c_err**2.)
+            cov_cc = cov_cc + np.diag(self.cons_c_err**2.)
             # add sigma_NL more error?
 
             self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
