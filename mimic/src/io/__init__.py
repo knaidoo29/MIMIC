@@ -36,4 +36,7 @@ from .paramfile import _nompi_read_paramfile
 from .paramfile import _mpi_read_paramfile
 from .paramfile import read_paramfile
 
+from .prepare import prep4MIMIC
+from .prepare import prep4MIMIC_LCDM
+
 from .progress import progress_bar

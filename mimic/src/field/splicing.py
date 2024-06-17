@@ -2,6 +2,7 @@ import numpy as np
 from scipy.special import expit
 
 
+
 def get_lowres_filter(k, lowres_k_nyq, k0=None, T=0.1):
     """Returns the low-resolution Fourier filter.
 
@@ -40,3 +41,11 @@ def get_highres_filter(k, lowres_k_nyq, k0=None, T=0.1):
     if k0 is None:
         k0 = 0.5*lowres_k_nyq
     return np.sqrt(1. - get_lowres_filter(k, lowres_k_nyq, k0=k0, T=T)**2.)
+
+
+# How to do this generically.
+def resample(dlowres, dhighres, ngridlow, ngridhigh, boxsize, MPI=None):
+
+    # need to distribute highres points to lowres.
+    # sample points
+    # redistribute to highres mpi

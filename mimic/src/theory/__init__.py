@@ -18,6 +18,9 @@ from .correlate import get_cc_matrix_fast
 from .correlate import get_corr_dot_eta_fast
 from .correlate import get_corr1_dot_inv_dot_corr2_fast
 
+# Covariance optimisation function
+from .cov_optimiser import optimize_sigma_NL
+
 # An overly accurate function for calculating the Hubble expansion rate, with
 # massive neutrinos, should the user desire it.
 from .Hz import z2a
@@ -39,3 +42,7 @@ from .numerical import get_num_fz
 from .numerical import get_num_fzk
 from .numerical import get_mean_Dz
 from .numerical import get_mean_fz
+
+# Sigma8 calculation
+from .sigma8 import get_sigma_8
+from .sigma8 import correct_pk_4_sigma8

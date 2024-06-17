@@ -84,10 +84,10 @@ def _load_constraints_npz(fname):
     ERROR = error._error_if_false(check.isfile(fname))
     error._error_message(ERROR, "File %s does not exist"%fname)
     error._break4error(ERROR)
-    data = np.load(fname, allow_pickle=True)
-    x, y, z = data['x'], data['y'], data['z']
-    ex, ey, ez = data['ex'], data['ey'], data['ez']
-    c, c_err, c_type = data['c'], data['c_err'], data['c_type'].astype('int')
+    data = np.load(fname)
+    x, y, z = data['x'].astype('float'), data['y'].astype('float'), data['z'].astype('float')
+    ex, ey, ez = data['ex'].astype('float'), data['ey'].astype('float'), data['ez'].astype('float')
+    c, c_err, c_type = data['c'].astype('float'), data['c_err'].astype('float'), data['c_type'].astype('int')
     return x, y, z, ex, ey, ez, c, c_err, c_type
 
 
@@ -109,7 +109,9 @@ def _save_constraints_npz(fname, x, y, z, ex, ey, ez, c, c_err, c_type):
     """
     if fname[-4:] != '.npz':
         fname += '.npz'
-    np.savez(fname, x=x, y=y, z=z, ex=ex, ey=ey, ez=ez, c=c, c_err=c_err, c_type=c_type)
+    np.savez(fname, x=x.astype('float'), y=y.astype('float'), z=z.astype('float'),
+        ex=ex.astype('float'), ey=ey.astype('float'), ez=ez.astype('float'),
+        c=c.astype('float'), c_err=c_err.astype('float'), c_type=c_type.astype('int'))
 
 
 def load_constraints(fname, filetype='npz'):

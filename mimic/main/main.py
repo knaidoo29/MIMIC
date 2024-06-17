@@ -8,9 +8,7 @@ from scipy.interpolate import interp1d
 
 from ..ext import fiesta, shift
 
-from .. import field, io, src, theory
-
-from . import cov_optimiser
+from ..src import field, io, theory
 
 
 mimic_beg = """
@@ -23,11 +21,10 @@ mimic_beg = """
 |                  |_|  |_| |_____| |_|  |_| |_____|  \_____|                  |
 |______________________________________________________________________________|
 |                                                                              |
-|        Model Independent constrained cosMological Initial Conditions         |
+|         Model unIversal constrained cosMological Initial Conditions          |
 |______________________________________________________________________________|
 
 """
-
 
 mimic_end = """
  ______________________________________________________________________________
@@ -48,8 +45,7 @@ class MIMIC:
         self.FFT_Ngrid = None
         self.ERROR = False
 
-        # Added to *eventually* include no MPI functionality. This may not be
-        # added, as it's unclear whether this will be necessary in the long run.
+        # To run with or without MPI (doesn't work at the moment!)
         if self.MPI is not None:
             self.rank = self.MPI.rank
             self.nompi = False
@@ -84,6 +80,8 @@ class MIMIC:
             "H0": None,
             "Omega_m": None,
             "PowerSpecFile": None,
+            "Sigma8": None,
+            "Correct4Sigma8": True,
             "ScaleDepGrowth": None,
             "GrowthFile": None
         }
@@ -95,6 +93,7 @@ class MIMIC:
             "Fname": None,
             "z_eff": None,
             "Rg": None,
+            "Rmax": None,
             "CorrFile": None,
             "CovFile": None,
             "CovOptimise": False,
@@ -105,11 +104,11 @@ class MIMIC:
         }
         self.WF = {
             "Field": None,
+            "Mode": None,
             "Convert": None,
             "CalcVar": None,
             "SubBoxsize": None,
-            "SubNgrid": None,
-            "CalcSubVar": None
+            "SubNgrid": None
         }
         self.RZA = {
             "Method": None
@@ -223,6 +222,7 @@ class MIMIC:
         self._lenpro = 20
         # output
         self.fname_prefix = None
+        self.logfile = None
 
     def start(self):
         """Starts the run and timers."""
@@ -232,9 +232,16 @@ class MIMIC:
     # Utility functions --------------------------------------------------------
 
     def _print_zero(self, *value):
+        if self.logfile is None:
+            i = 0
+            while io.isfile("mimic_output_%i.txt"%i):
+                i += 1
+            self.logfile = "mimic_output_%i.txt"%i
+            self.MPI.mpi_print2file(self.logfile)
         """Print at rank=0."""
         if self.nompi is None:
             print(*value, flush=True)
+            print(*value, **{"file": self.logfile})
         else:
             self.MPI.mpi_print_zero(*value)
 
@@ -290,7 +297,7 @@ class MIMIC:
 
         if self._check_param_key(params["Cosmology"], "H0"):
             self.cosmo["H0"] = float(params["Cosmology"]["H0"])
-            self._print_zero(" - H0 \t\t\t=", self.cosmo["H0"])
+            self._print_zero(" - H0                 =", self.cosmo["H0"])
         else:
             self.ERROR = True
             io._error_message(self.ERROR, "H0 must be defined.", MPI=self.MPI)
@@ -298,7 +305,7 @@ class MIMIC:
 
         if self._check_param_key(params["Cosmology"], "Omega_m"):
             self.cosmo["Omega_m"] = float(params["Cosmology"]["Omega_m"])
-            self._print_zero(" - Omega_m \t\t=", self.cosmo["Omega_m"])
+            self._print_zero(" - Omega_m            =", self.cosmo["Omega_m"])
         else:
             self.ERROR = True
             io._error_message(self.ERROR, "Omega_m must be defined.", MPI=self.MPI)
@@ -306,16 +313,26 @@ class MIMIC:
 
         if self._check_param_key(params["Cosmology"], "PowerSpecFile"):
             self.cosmo["PowerSpecFile"] = str(params["Cosmology"]["PowerSpecFile"])
-            self._print_zero(" - PowerSpecFile \t=", self.cosmo["PowerSpecFile"])
+            self._print_zero(" - PowerSpecFile      =", self.cosmo["PowerSpecFile"])
             self._check_exist(self.cosmo["PowerSpecFile"])
         else:
             self.ERROR = True
             io._error_message(self.ERROR, "PowerSpecFile must be defined.", MPI=self.MPI)
         self._break4error()
 
+        if self._check_param_key(params["Cosmology"], "Sigma8"):
+            if params["Cosmology"]["Sigma8"] != 'None':
+                self.cosmo["Sigma8"] = params["Cosmology"]["Sigma8"]
+                self._print_zero(" - Sigma8             =", self.cosmo["Sigma8"])
+
+        if self._check_param_key(params["Cosmology"], "Correct4Sigma8"):
+            if params["Cosmology"]["Correct4Sigma8"] != 'None' :
+                self.cosmo["Correct4Sigma8"] = params["Cosmology"]["Correct4Sigma8"]
+                self._print_zero(" - Correct4Sigma8     =", self.cosmo["Correct4Sigma8"])
+
         if self._check_param_key(params["Cosmology"], "ScaleDepGrowth"):
             self.cosmo["ScaleDepGrowth"] = bool(params["Cosmology"]["ScaleDepGrowth"])
-            self._print_zero(" - ScaleDepGrowth \t=", self.cosmo["ScaleDepGrowth"])
+            self._print_zero(" - ScaleDepGrowth     =", self.cosmo["ScaleDepGrowth"])
         else:
             self.ERROR = True
             io._error_message(self.ERROR, "ScaleDepGrowth must be defined.", MPI=self.MPI)
@@ -323,7 +340,7 @@ class MIMIC:
 
         if self._check_param_key(params["Cosmology"], "GrowthFile"):
             self.cosmo["GrowthFile"] = str(params["Cosmology"]["GrowthFile"])
-            self._print_zero(" - GrowthFile \t\t=", self.cosmo["GrowthFile"])
+            self._print_zero(" - GrowthFile         =", self.cosmo["GrowthFile"])
             self._check_exist(self.cosmo["GrowthFile"])
         else:
             self.ERROR = True
@@ -337,7 +354,7 @@ class MIMIC:
 
         if self._check_param_key(params["Siminfo"], "Boxsize"):
             self.siminfo["Boxsize"] = float(params["Siminfo"]["Boxsize"])
-            self._print_zero(" - Boxsize \t\t=", self.siminfo["Boxsize"])
+            self._print_zero(" - Boxsize            =", self.siminfo["Boxsize"])
         else:
             self.ERROR = True
             io._error_message(self.ERROR, "Boxsize must be defined.", MPI=self.MPI)
@@ -345,7 +362,7 @@ class MIMIC:
 
         if self._check_param_key(params["Siminfo"], "Ngrid"):
             self.siminfo["Ngrid"] = int(params["Siminfo"]["Ngrid"])
-            self._print_zero(" - Ngrid \t\t=", self.siminfo["Ngrid"])
+            self._print_zero(" - Ngrid              =", self.siminfo["Ngrid"])
         else:
             self.ERROR = True
             io._error_message(self.ERROR, "Ngrid must be defined.", MPI=self.MPI)
@@ -360,7 +377,7 @@ class MIMIC:
 
             if self._check_param_key(params["Constraints"], "Fname"):
                 self.constraints["Fname"] = str(params["Constraints"]["Fname"])
-                self._print_zero(" - Fname \t\t=", self.constraints["Fname"])
+                self._print_zero(" - Fname              =", self.constraints["Fname"])
                 self._check_exist(self.constraints["Fname"])
             else:
                 self.ERROR = True
@@ -369,7 +386,7 @@ class MIMIC:
 
             if self._check_param_key(params["Constraints"], "z_eff"):
                 self.constraints["z_eff"] = float(params["Constraints"]["z_eff"])
-                self._print_zero(" - z_eff \t\t=", self.constraints["z_eff"])
+                self._print_zero(" - z_eff              =", self.constraints["z_eff"])
             else:
                 self.ERROR = True
                 io._error_message(self.ERROR, "Constraint z_eff must be defined.", MPI=self.MPI)
@@ -377,48 +394,53 @@ class MIMIC:
 
             if self._check_param_key(params["Constraints"], "Rg"):
                 self.constraints["Rg"] = float(params["Constraints"]["Rg"])
-                self._print_zero(" - Rg \t\t\t=", self.constraints["Rg"])
+                self._print_zero(" - Rg                 =", self.constraints["Rg"])
             else:
                 self.ERROR = True
                 io._error_message(self.ERROR, "Constraint Rg must be defined.", MPI=self.MPI)
             self._break4error()
 
+            if self._check_param_key(params["Constraints"], "Rmax"):
+                if params["Constraints"]["Rmax"] != 'None':
+                    self.constraints["Rmax"] = params["Constraints"]["Rmax"]
+                    self._print_zero(" - Rmax               =", self.constraints["Rmax"])
+
             if self._check_param_key(params["Constraints"], "CorrFile"):
                 if params["Constraints"]["CorrFile"] != 'None':
                     self.constraints["CorrFile"] = params["Constraints"]["CorrFile"]
                     self._check_exist(self.constraints["CorrFile"])
-                    self._print_zero(" - CorrFile \t\t=", self.constraints["CorrFile"])
+                    self._print_zero(" - CorrFile           =", self.constraints["CorrFile"])
 
             if self._check_param_key(params["Constraints"], "CovFile"):
                 if str(params["Constraints"]["CovFile"]) != "None":
                     self.constraints["CovFile"] = params["Constraints"]["CovFile"]
                     self._check_exist(self.constraints["CovFile"])
-                    self._print_zero(" - CovFile \t\t=", self.constraints["CovFile"])
+                    self._print_zero(" - CovFile            =", self.constraints["CovFile"])
 
             if self._check_param_key(params["Constraints"], "CovOptimise"):
                 if params["Constraints"]["CovOptimise"] != "None":
                     self.constraints["CovOptimise"] = bool(params["Constraints"]["CovOptimise"])
-                    self._print_zero(" - CovOptimise \t\t=", io.bool2yesno(self.constraints["CovOptimise"]))
+                    self._print_zero(" - CovOptimise        =", io.bool2yesno(self.constraints["CovOptimise"]))
 
             if self._check_param_key(params["Constraints"], "dens_Sigma_NL"):
                 if params["Constraints"]["dens_Sigma_NL"] != 'None':
                     self.constraints["dens_Sigma_NL"] = float(params["Constraints"]["dens_Sigma_NL"])
-                    self._print_zero(" - dens_Sigma_NL \t=", self.constraints["dens_Sigma_NL"])
+                    self._print_zero(" - dens_Sigma_NL      =", self.constraints["dens_Sigma_NL"])
 
             if self._check_param_key(params["Constraints"], "psi_Sigma_NL"):
                 if params["Constraints"]["psi_Sigma_NL"] != "None":
                     self.constraints["psi_Sigma_NL"] = float(params["Constraints"]["psi_Sigma_NL"])
-                    self._print_zero(" - psi_Sigma_NL \t=", self.constraints["psi_Sigma_NL"])
+                    self._print_zero(" - psi_Sigma_NL       =", self.constraints["psi_Sigma_NL"])
 
             if self._check_param_key(params["Constraints"], "vel_Sigma_NL"):
                 if params["Constraints"]["vel_Sigma_NL"] != "None":
                     self.constraints["vel_Sigma_NL"] = float(params["Constraints"]["vel_Sigma_NL"])
-                    self._print_zero(" - vel_Sigma_NL \t=", self.constraints["vel_Sigma_NL"])
+                    self._print_zero(" - vel_Sigma_NL       =", self.constraints["vel_Sigma_NL"])
 
             if self._check_param_key(params["Constraints"], "klims"):
                 if params["Constraints"]["klims"] != "None":
                     self.constraints["klims"] = bool(params["Constraints"]["klims"])
-                    self._print_zero(" - klims \t\t=", io.bool2yesno(self.constraints["klims"]))
+                    self._print_zero(" - klims              =", io.bool2yesno(self.constraints["klims"]))
 
 
         if self._check_param_key(params, "WF"):
@@ -434,11 +456,11 @@ class MIMIC:
             self.ERROR = io._error_if_false(check)
             io._error_message(self.ERROR, "Field string is unsupported, current %s but must be either 'dens', 'psi_x', 'psi_y', 'psi_z', 'vel_x', 'vel_y' and 'vel_z'.")
 
-            self._print_zero(" - Field \t\t=", self.WF["Field"])
+            self._print_zero(" - Field              =", self.WF["Field"])
 
             if self._check_param_key(params["WF"], "Mode"):
                 self.WF["Mode"] = params["WF"]["Mode"]
-                self._print_zero(" - Mode \t\t=", self.WF["Mode"])
+                self._print_zero(" - Mode               =", self.WF["Mode"])
             else:
                 self.ERROR = True
             io._error_message(self.ERROR, "WF Mode must be defined.", MPI=self.MPI)
@@ -451,7 +473,7 @@ class MIMIC:
                 if self._check_param_key(params["WF"], "CalcVar"):
                     if params["WF"]["CalcVar"] != "None":
                         self.WF["CalcVar"] = bool(params["WF"]["CalcVar"])
-                        self._print_zero(" - CalcVar \t\t=", io.bool2yesno(self.WF["CalcVar"]))
+                        self._print_zero(" - CalcVar            =", io.bool2yesno(self.WF["CalcVar"]))
                     else:
                         self.WF["CalcVar"] = False
                 else:
@@ -464,7 +486,7 @@ class MIMIC:
                         if self.WF["Field"] == "dens":
                             if io.inlist(params["WF"]["Convert"], ["psi", "vel"]):
                                 self.WF["Convert"] = params["WF"]["Convert"]
-                                self._print_zero(" - Convert \t\t=", self.WF["Convert"])
+                                self._print_zero(" - Convert            =", self.WF["Convert"])
                             else:
                                 self.ERROR = True
                                 io._error_message(self.ERROR, "WF convert %s must either be 'psi' or 'vel'." % self.WF["Convert"], MPI=self.MPI)
@@ -478,7 +500,7 @@ class MIMIC:
                 if self._check_param_key(params["WF"], "SubBoxsize"):
                     if params["WF"]["SubBoxsize"] != "None":
                         self.WF["SubBoxsize"] = float(params["WF"]["SubBoxsize"])
-                        self._print_zero(" - SubBoxsize \t\t=", self.WF["SubBoxsize"])
+                        self._print_zero(" - SubBoxsize         =", self.WF["SubBoxsize"])
                     else:
                         self.ERROR = True
                 else:
@@ -489,7 +511,7 @@ class MIMIC:
                 if self._check_param_key(params["WF"], "SubNgrid"):
                     if params["WF"]["SubNgrid"] != "None":
                         self.WF["SubNgrid"] = int(params["WF"]["SubNgrid"])
-                        self._print_zero(" - SubNgrid \t\t=", self.WF["SubNgrid"])
+                        self._print_zero(" - SubNgrid           =", self.WF["SubNgrid"])
                     else:
                         self.ERROR = True
                 else:
@@ -497,31 +519,31 @@ class MIMIC:
                 io._error_message(self.ERROR, "SubNgrid must be defined.", MPI=self.MPI)
                 self._break4error()
 
-                if self._check_param_key(params["WF"], "CalcSubVar"):
-                    if params["WF"]["CalcSubVar"] != "None":
-                        self.WF["CalcSubVar"] = bool(params["WF"]["CalcSubVar"])
-                        self._print_zero(" - CalcSubVar \t\t=", io.bool2yesno(self.WF["CalcSubVar"]))
+                if self._check_param_key(params["WF"], "CalcVar"):
+                    if params["WF"]["CalcVar"] != "None":
+                        self.WF["CalcVar"] = bool(params["WF"]["CalcVar"])
+                        self._print_zero(" - CalcVar            =", io.bool2yesno(self.WF["CalcVar"]))
                     else:
-                        self.WF["CalcSubVar"] = False
+                        self.WF["CalcVar"] = False
                 else:
-                    self.WF["CalcSubVar"] = False
+                    self.WF["CalcVar"] = False
 
                 self.what2run["WF_SubBox"] = True
-                self.what2run["WF_SubVar"] = self.WF["CalcSubVar"]
+                self.what2run["WF_SubVar"] = self.WF["CalcVar"]
 
             elif self.WF["Mode"] == "Cons":
 
-                if self._check_param_key(params["WF"], "CalcConsVar"):
-                    if params["WF"]["CalcConsVar"] != "None":
-                        self.WF["CalcConsVar"] = bool(params["WF"]["CalcConsVar"])
-                        self._print_zero(" - CalcConsVar \t\t=", io.bool2yesno(self.WF["CalcConsVar"]))
+                if self._check_param_key(params["WF"], "CalcVar"):
+                    if params["WF"]["CalcVar"] != "None":
+                        self.WF["CalcVar"] = bool(params["WF"]["CalcVar"])
+                        self._print_zero(" - CalcVar            =", io.bool2yesno(self.WF["CalcVar"]))
                     else:
-                        self.WF["CalcConsVar"] = False
+                        self.WF["CalcVar"] = False
                 else:
-                    self.WF["CalcConsVar"] = False
+                    self.WF["CalcVar"] = False
 
                 self.what2run["WF_Cons"] = True
-                self.what2run["WF_ConsVar"] = self.WF["CalcConsVar"]
+                self.what2run["WF_ConsVar"] = self.WF["CalcVar"]
 
         if self._check_param_key(params, "RZA"):
 
@@ -530,7 +552,7 @@ class MIMIC:
 
             if self._check_param_key(params["RZA"], "Method"):
                 self.RZA["Method"] = int(params["RZA"]["Method"])
-                self._print_zero(" - Method \t\t=", self.RZA["Method"])
+                self._print_zero(" - Method             =", self.RZA["Method"])
             else:
                 self.ERROR = True
             io._error_message(self.ERROR, "RZA method must be defined.", MPI=self.MPI)
@@ -554,14 +576,14 @@ class MIMIC:
             if self._check_param_key(params["ICs"], "Seed"):
                 self.ICs["Seed"] = int(params["ICs"]["Seed"])
                 self._print_zero()
-                self._print_zero(" - Seed \t\t=", self.ICs["Seed"])
+                self._print_zero(" - Seed               =", self.ICs["Seed"])
             elif self._check_param_key(params["ICs"], "WNFile"):
                 if params["ICs"]["WNFile"] != "None":
                     self.ICs["WNFile"] = str(params["ICs"]["WNFile"])
                     self._check_exist(self.ICs["WNFile"])
                     self._break4error()
                     self._print_zero()
-                    self._print_zero(" - WNFile \t\t=", self.ICs["WNFile"])
+                    self._print_zero(" - WNFile             =", self.ICs["WNFile"])
                 else:
                     self.ERROR = True
             else:
@@ -572,7 +594,7 @@ class MIMIC:
 
             if self._check_param_key(params["ICs"], "z_ic"):
                 self.ICs["z_ic"] = float(params["ICs"]["z_ic"])
-                self._print_zero(" - z_ic \t\t=", self.ICs["z_ic"])
+                self._print_zero(" - z_ic               =", self.ICs["z_ic"])
             else:
                 self.ERROR = True
                 io._error_message(self.ERROR, "IC z_ic must be defined.", MPI=self.MPI)
@@ -580,7 +602,7 @@ class MIMIC:
 
             if self._check_param_key(params["ICs"], "gadget_format"):
                 self.ICs["gadget_format"] = int(params["ICs"]["gadget_format"])
-                self._print_zero(" - gadget_format \t=", self.ICs["gadget_format"])
+                self._print_zero(" - gadget_format      =", self.ICs["gadget_format"])
             else:
                 self.ERROR = True
                 io._error_message(self.ERROR, "IC gadget_format must be defined.", MPI=self.MPI)
@@ -593,8 +615,8 @@ class MIMIC:
 
             self.what2run["IC"] = True
 
-            self._print_zero(" - CR \t\t\t=", io.bool2yesno(self.what2run["CR"]))
-            self._print_zero(" - IC \t\t\t=", io.bool2yesno(self.what2run["IC"]))
+            self._print_zero(" - CR                 =", io.bool2yesno(self.what2run["CR"]))
+            self._print_zero(" - IC                 =", io.bool2yesno(self.what2run["IC"]))
 
         else:
             self.what2run["IC"] = False
@@ -606,7 +628,7 @@ class MIMIC:
 
         if self._check_param_key(params["Outputs"], "OutputFolder"):
             self.outputs["OutputFolder"] = str(params["Outputs"]["OutputFolder"])
-            self._print_zero(" - OutputFolder \t=", self.outputs["OutputFolder"])
+            self._print_zero(" - OutputFolder       =", self.outputs["OutputFolder"])
         else:
             self.ERROR = True
         io._error_message(self.ERROR, "OutputFolder must be defined.", MPI=self.MPI)
@@ -614,7 +636,7 @@ class MIMIC:
 
         if self._check_param_key(params["Outputs"], "Prefix"):
             self.outputs["Prefix"] = str(params["Outputs"]["Prefix"])
-            self._print_zero(" - Prefix \t\t=", self.outputs["Prefix"])
+            self._print_zero(" - Prefix             =", self.outputs["Prefix"])
         else:
             self.ERROR = True
         io._error_message(self.ERROR, "Output prefix must be defined.", MPI=self.MPI)
@@ -667,6 +689,18 @@ class MIMIC:
         data = np.load(self.cosmo["PowerSpecFile"])
         self.theory_kh, self.theory_pk = data['kh'], data['pk']
 
+        if self.cosmo["Correct4Sigma8"]:
+            self._print_zero(" - Correct P(k) for Sigma8")
+            sigma8_frompk = theory.get_sigma_8(self.theory_kh, self.theory_pk)
+            self._print_zero(" -- Sigma8 from Pk = %0.4f" % sigma8_frompk)
+            kf = shift.cart.get_kf(self.siminfo["Boxsize"])
+            kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+            cond = np.where((self.theory_kh >= kf) & (self.theory_kh <= kn))[0]
+            sigma8_frompklim = theory.get_sigma_8(self.theory_kh[cond], self.theory_pk[cond])
+            self._print_zero(" -- Sigma8 from limited Pk = %0.4f" % sigma8_frompklim)
+            self._print_zero(" -- Sigma8 correction factor = %0.4f" % (sigma8_frompk/sigma8_frompklim)**2.)
+            self.theory_pk *= (sigma8_frompk/sigma8_frompklim)**2.
+
         self._print_zero(" - Create P(k) interpolator")
         self.kmin, self.kmax = self.theory_kh.min(), self.theory_kh.max()
 
@@ -707,6 +741,21 @@ class MIMIC:
         """Check constraints are within the box."""
         self._print_zero()
         self._print_zero(" - Prepare Constraints")
+        # Force type conversion to prevent odd 'float' has not 'sqrt' attribute error.
+        # Not quite sure why this is necessary, but this type specification seems to
+        # fix the issue.
+        self.cons_x = self.cons_x.astype('float')
+        self.cons_y = self.cons_y.astype('float')
+        self.cons_z = self.cons_z.astype('float')
+        self.cons_ex = self.cons_ex.astype('float')
+        self.cons_ey = self.cons_ey.astype('float')
+        self.cons_ez = self.cons_ez.astype('float')
+        self.cons_id = self.cons_id.astype('int')
+        self.cons_c = self.cons_c.astype('float')
+        self.cons_c_err = self.cons_c_err.astype('float')
+        self.cons_c_type = self.cons_c_type.astype('int')
+        if self.cons_c_RR is not None:
+            self.cons_c_RR = self.cons_c_RR.astype('float')
         # Normalise direction
         self._print_zero(" -- Normalize velocity unit vector")
         norm = (self.cons_ex**2. + self.cons_ey**2. + self.cons_ez**2.)**0.5
@@ -715,9 +764,19 @@ class MIMIC:
         self.cons_ez /= norm
         # Keep only positions inside the box, r <= halfboxsize
         self._print_zero(" -- Remove constrained points outside of the simulation box")
-        cond = np.where((self.cons_x >= 0.) & (self.cons_x <= self.siminfo["Boxsize"]) &
-                        (self.cons_y >= 0.) & (self.cons_y <= self.siminfo["Boxsize"]) &
-                        (self.cons_z >= 0.) & (self.cons_z <= self.siminfo["Boxsize"]))[0]
+        if self.constraints["Rmax"] is None:
+            cond = np.where((self.cons_x >= 0.) & (self.cons_x <= self.siminfo["Boxsize"]) &
+                            (self.cons_y >= 0.) & (self.cons_y <= self.siminfo["Boxsize"]) &
+                            (self.cons_z >= 0.) & (self.cons_z <= self.siminfo["Boxsize"]))[0]
+        else:
+            cons_r2 = (self.cons_x - self.halfsize)**2.
+            cons_r2 += (self.cons_y - self.halfsize)**2.
+            cons_r2 += (self.cons_z - self.halfsize)**2.
+            cons_r = np.sqrt(cons_r2)
+            cond = np.where((self.cons_x >= 0.) & (self.cons_x <= self.siminfo["Boxsize"]) &
+                            (self.cons_y >= 0.) & (self.cons_y <= self.siminfo["Boxsize"]) &
+                            (self.cons_z >= 0.) & (self.cons_z <= self.siminfo["Boxsize"]) &
+                            (cons_r <= self.constraints["Rmax"]))[0]
         self._print_zero(" -- Retained %i constrained points from %i" % (len(cond), len(self.cons_x)))
         self.cons_id = self.cons_id[cond]
         self.cons_x = self.cons_x[cond]
@@ -754,6 +813,7 @@ class MIMIC:
         self.cons_z += self.halfsize
         self.cons_id = np.arange(len(self.cons_x))
         self._check_constraints()
+
 
     # Correlation functions ----------------------------------------------------
 
@@ -809,17 +869,20 @@ class MIMIC:
             self.sim_kmin = None
             self.sim_kmax = None
 
-            if self.what2run["WF"] or self.what2run["WF_Cons"] or self.what2run["CR"] or self.what2run["IC"]:
-                #self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
-                #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
-                kf = shift.cart.get_kf(self.siminfo["Boxsize"])
-                kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+            kn = shift.cart.get_kf(self.siminfo["Boxsize"])
+            kf = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
 
-            elif self.what2run["WF_SubBox"]:
-                #self.sim_kmin = shift.cart.get_kf(self.WF["SubBoxsize"])
-                #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
-                kf = shift.cart.get_kf(self.siminfo["Boxsize"])
-                kn = shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
+            # if self.what2run["WF"] or self.what2run["WF_Cons"] or self.what2run["CR"] or self.what2run["IC"]:
+            #     #self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
+            #     #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+            #     kf = shift.cart.get_kf(self.siminfo["Boxsize"])
+            #     kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+            #
+            # elif self.what2run["WF_SubBox"]:
+            #     #self.sim_kmin = shift.cart.get_kf(self.WF["SubBoxsize"])
+            #     #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
+            #     kf = shift.cart.get_kf(self.siminfo["Boxsize"])
+            #     kn = shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
 
             smallfilter = field.get_lowres_filter(self.theory_kh, kn, k0=None, T=0.1)
             largefilter = field.get_highres_filter(self.theory_kh, kf, k0=None, T=0.1)
@@ -958,6 +1021,7 @@ class MIMIC:
         self.interp_psiR_uu = interp1d(self.corr_r, self.corr_psiR_uu, kind='cubic', bounds_error=False, fill_value=0.)
         self.interp_psiT_uu = interp1d(self.corr_r, self.corr_psiT_uu, kind='cubic', bounds_error=False, fill_value=0.)
 
+
     # This might need some rethinking, naming wise rather than pipeline.
     def prep(self):
         """Runs all the grid, theory and constraint preparation functions."""
@@ -966,12 +1030,14 @@ class MIMIC:
         self._prep_constraints()
         self._prep_correlators(self.constraints["z_eff"])
 
+
     # Wiener Filtering ----------------------------------------------------
 
     def _save_cov(self):
         """Save covariance matrix."""
         fname = self._get_fname_prefix() + 'cov.npz'
         np.savez(fname, cov=self.cov, c=self.cons_c, c_type=self.cons_c_type)
+
 
     def _cov_opt(self):
         """Optimise covariance non-linear dispersion"""
@@ -985,7 +1051,7 @@ class MIMIC:
             if self.MPI.rank == 0:
                 _cov = self.cov[cond]
                 _cov = _cov[:, cond]
-                success, sigma_NL = cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
+                success, sigma_NL = theory.cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
                     _cov, max_sig_NL=10., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
             else:
                 success, sigma_NL = None, None
@@ -1011,7 +1077,7 @@ class MIMIC:
             if self.MPI.rank == 0:
                 _cov = self.cov[cond]
                 _cov = _cov[:, cond]
-                success, sigma_NL = cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
+                success, sigma_NL = theory.cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
                     _cov, max_sig_NL=5., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
             else:
                 success, sigma_NL = None, None
@@ -1037,7 +1103,7 @@ class MIMIC:
             if self.MPI.rank == 0:
                 _cov = self.cov[cond]
                 _cov = _cov[:, cond]
-                success, sigma_NL = cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
+                success, sigma_NL = theory.cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
                     _cov, max_sig_NL=400., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
             else:
                 success, sigma_NL = None, None
@@ -1113,14 +1179,13 @@ class MIMIC:
             self._print_zero(" - Compute eta vector [at MPI.rank = 0]")
             self.eta = self.inv.dot(self.cons_c)
 
-        self.MPI.wait()
-
         self._print_zero(" - Broadcast eta vector")
         self.cov = self.MPI.broadcast(self.cov)
         self.eta = self.MPI.broadcast(self.eta)
         self.inv = self.MPI.broadcast(self.inv)
 
         self.MPI.wait()
+
 
     # Real and Fourier Grid functions ------------------------------------------
 
@@ -1288,6 +1353,7 @@ class MIMIC:
                 z=self.cons_z-self.halfsize, ex=self.cons_ex, ey=self.cons_ey,
                 ez=self.cons_ez, c=self.cons_c, c_err=self.cons_c_err,
                 c_type=self.cons_c_type, WF=WF, WF_var=WF_var)
+        self.MPI.wait()
 
 
     def get_WF(self):
@@ -1764,15 +1830,6 @@ class MIMIC:
 
     # FFT related functions ----------------------------------------------------
 
-    def start_FFT(self, Ngrid):
-        """Start mpi4py-fft object."""
-        # if self.FFT is None or self.FFT_Ngrid != Ngrid:
-        #     self.FFT_Ngrid = Ngrid
-        #     Ngrids = np.array([Ngrid, Ngrid, Ngrid], dtype=int)
-        #     self.FFT = self.MPI.mpi_fft_start(Ngrids)
-        pass
-
-
     def complex_zeros(self, shape):
         """Construct complex zeros."""
         return np.zeros(shape) + 1j*np.zeros(shape)
@@ -1783,7 +1840,6 @@ class MIMIC:
     def dens2psi(self, dens):
         """Conversion from density to displacement fields along each cartesian
         axes."""
-        self.start_FFT(self.siminfo["Ngrid"])
         self.get_grid3D()
         self.get_kgrid3D()
         kmag = self.get_kgrid_mag()
@@ -1814,7 +1870,6 @@ class MIMIC:
         adot = theory.z2a(z0)*Hz
 
         if self.cosmo["ScaleDepGrowth"]:
-            self.start_FFT(self.siminfo["Ngrid"])
             self.get_kgrid3D()
             kmag = self.get_kgrid_mag()
 
@@ -1950,6 +2005,7 @@ class MIMIC:
             cons_rza_ez = np.copy(cons_ez)
             cons_rza_c = np.copy(cons_c)
             cons_rza_c_err = np.copy(cons_c_err)
+            cons_rza_c_type = 2*np.ones(len(cons_c))
 
         elif self.RZA["Method"] == 3:
             # See above paper for Method III
@@ -1965,6 +2021,7 @@ class MIMIC:
             cons_rza_ex = cons_rza_x / cons_rza_c
             cons_rza_ey = cons_rza_y / cons_rza_c
             cons_rza_ez = cons_rza_z / cons_rza_c
+            cons_rza_c_type = 1*np.ones(len(cons_c))
 
         self.cons_x = self.MPI.collect_noNone(cons_rza_x)
         self.cons_y = self.MPI.collect_noNone(cons_rza_y)
@@ -1976,6 +2033,7 @@ class MIMIC:
 
         self.cons_c = self.MPI.collect_noNone(cons_rza_c)
         self.cons_c_err = self.MPI.collect_noNone(cons_rza_c_err)
+        self.cons_c_type = self.MPI.collect_noNone(cons_rza_c_type)
 
         self.cons_x = self.MPI.broadcast(self.cons_x)
         self.cons_y = self.MPI.broadcast(self.cons_y)
@@ -1987,6 +2045,7 @@ class MIMIC:
 
         self.cons_c = self.MPI.broadcast(self.cons_c)
         self.cons_c_err = self.MPI.broadcast(self.cons_c_err)
+        self.cons_c_type = self.MPI.broadcast(self.cons_c_type)
 
         fname = self._get_fname_prefix() + 'rza.npz'
         self._print_zero(" - Saving RZA constraints to: %s" % fname)
@@ -2022,12 +2081,9 @@ class MIMIC:
         self.get_kgrid3D()
         kmag = self.get_kgrid_mag()
 
-        self.start_FFT(self.siminfo["Ngrid"])
-
         if self.ICs["Seed"] is not None:
-            seed = self.ICs["Seed"] + self.rank
-            self._print_zero(" - Construct white noise field with seed %i" % seed)
-            WN = field.get_white_noise(seed, *self.x_shape)
+            self._print_zero(" - Construct white noise field with seed %i" % self.ICs["Seed"])
+            WN = field.get_white_noise_3D(self.ICs["Seed"], self.siminfo["Ngrid"], MPI=self.MPI)
         elif self.ICs["WNFile"] is not None:
             fname = self.ICs["WNFile"]
             self._check_exist(fname)
@@ -2080,7 +2136,6 @@ class MIMIC:
         z0 = redshift
         z1 = redshift_current
         if self.cosmo["ScaleDepGrowth"]:
-            self.start_FFT(self.siminfo["Ngrid"])
             self.get_kgrid3D()
             kmag = self.get_kgrid_mag()
             dens_k = shift.cart.mpi_fft3D(dens, self.x_shape, self.siminfo["Boxsize"],
@@ -2219,7 +2274,7 @@ class MIMIC:
 
         self.MPI.wait()
 
-        #self.compute_cov()
+        self.compute_cov()
 
         self.compute_eta_CR()
 

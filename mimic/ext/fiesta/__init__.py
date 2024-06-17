@@ -1,5 +1,5 @@
 
-# from . import boundary
+from . import boundary
 from . import coords
 # from . import dtfe
 # from . import maths

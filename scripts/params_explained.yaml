@@ -1,0 +1,106 @@
+# Define basic cosmological parameters
+Cosmology:
+  # Hubble constant given in km.s^-1.Mpc^-1
+  H0: 67.66
+  # Dimensionless matter density
+  Omega_m: 0.3111
+  # Power spectra file in npz format, use prep4MIMIC function to prepare in
+  # correct format
+  PowerSpecFile: 'LCDM_pk0.npz'
+  # Sigma8, if None we assume the powerspectra has the right sigma8 value.
+  Sigma8: None
+  # Correction for sigma8, optional, default is True
+  Correct4Sigma8: False
+  # Specify whether growth functions are scale dependent
+  ScaleDepGrowth: False
+  # Growth function file in npz format, use prep4MIMIC function to prepare in
+  # correct format
+  GrowthFile: 'LCDM_growth_scale_indep.npz'
+
+# Define basic boxsize and grid for simulation
+Siminfo:
+  # Size of the simulation box
+  Boxsize: 500.
+  # Grid division along each axis
+  Ngrid: 32
+
+# Constraint information
+Constraints:
+  # Constraint filename
+  Fname : 'CF2.npz'
+  # The effective redshift of the constraints
+  z_eff: 0.
+  # Smoothing scale for constraints
+  Rg: 0.
+  # Define the maximum Radial comoving distance to keep constraints within
+  Rmax: None
+  # Theoretical Correlation file, this is outputed when mimic runs and can be
+  # used for future calculations without have to precalculate again
+  CorrFile: None
+  # Covariance file, this is outputed when mimic runs and can be used for future
+  # calculations without have to precalculate again
+  CovFile: None
+  # Optimise for non-linear/unknown-systematics in covariance errors by adding
+  # extra variance to ensure the chi^2/dof ~ 1
+  CovOptimise: True
+  # Directly specify the non-linear/unknown-systematics components
+  dens_Sigma_NL: 0.
+  phi_Sigma_NL: 0.
+  vel_Sigma_NL: 0.
+  # Limit the powerspectra input to the limits of the simulation, i.e. kmin >
+  # fundamental frequency given by the boxsize and kmax < Nyquist frequency
+  # given by the resolution
+  klims: True
+
+# Wiener filter parameters
+WF:
+  # Specify the field to compute, options:
+  # - 'dens' : density field
+  # - 'phi_x'/'phi_y'/'phi_z' : displacement field along axis x, y or z
+  # - 'phi_r' : displacement field along radial axis from the observer, i.e.
+  #   center of the box
+  # - 'vel_x'/'vel_y'/'vel_z' : displacement field along axis x, y or z
+  # - 'vel_r' : displacement field along radial axis from the observer, i.e.
+  #   center of the box
+  Field: 'dens'
+  # WF mode, options:
+  # - 'Full' : for the full simulation box
+  # - 'Sub' : for a smaller subbox defined within the simulation
+  # - 'Cons' : for computing the WF only at the constraint points
+  Mode: 'Full'
+  # Compute WF variance
+  CalcVar: False
+  # If Field == 'dens' Convert allows you to convert directly convert to the
+  # displacement or velocity field.
+  Convert: False
+  # Define Subbox size.
+  SubBoxsize: 100.
+  # Define Subbox resolution
+  SubNgrid: 128
+
+# Reverse Zel'dovich approximation [Needs Work]
+RZA:
+  # RZA methods, options:
+  # - 2 : move constraints but keep constraint values.
+  # - 3 : move constraints but adopt WF values and errors.
+  Method: 2
+
+# Construct initial conditions
+ICs:
+  # Random seed
+  Seed: 504
+  # White noise file in npz format
+  WNFile: None
+  # Initial condition redshift
+  z_ic: 30.
+  # Gadget format
+  gadget_format: 1
+  # Construct constrained realisation
+  CR: True
+
+# Outputs
+Outputs:
+  # Output folder to put place outputs in
+  OutputFolder: 'Test'
+  # Prefix added to file outputs
+  Prefix: 'test_'
