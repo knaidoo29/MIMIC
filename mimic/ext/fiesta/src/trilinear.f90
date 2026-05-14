@@ -287,7 +287,7 @@ end subroutine trilinear_nonperiodic
 
 
 subroutine trilinear_axisperiodic(fgrid, x, y, z, xbox, ybox, zbox, perix, periy, &
-  periz, ngridx, ngridy, ngridz, npart, f)
+  periz, ngridx, ngridy, ngridz, ngridf, npart, f)
 
   ! Trilinear interpolation of field defined on a grid.
   !
@@ -320,8 +320,8 @@ subroutine trilinear_axisperiodic(fgrid, x, y, z, xbox, ybox, zbox, perix, periy
 
   ! define variables
 
-  integer, intent(in) :: ngridx, ngridy, ngridz, npart, perix, periy, periz
-  real(kind=dp), intent(in) :: fgrid(ngridx*ngridy*ngridz)
+  integer, intent(in) :: ngridx, ngridy, ngridz, ngridf, npart, perix, periy, periz
+  real(kind=dp), intent(in) :: fgrid(ngridf)
   real(kind=dp), intent(in) :: x(npart), y(npart), z(npart), xbox, ybox, zbox
   real(kind=dp), intent(out) :: f(npart)
 

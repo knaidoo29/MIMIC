@@ -1,14 +1,11 @@
+# Field (i.e. on a grid) based calculations
+from . import field
 
-from .interp import interp_lin_float
-from .interp import interp_lin_array
+# Fortran source code, used to speed up computation
+from . import fortran_src
 
-from .interp import interp_log_float
-from .interp import interp_log_array
+# Input/Output
+from . import io
 
-from .fast_eta import periodic_1d_single
-from .fast_eta import periodic_3d_single
-
-from .fast_eta import get_wf_single_fast
-from .fast_eta import get_wf_fast
-
-from .progress import progress_bar
+# Theoretical calculations
+from . import theory

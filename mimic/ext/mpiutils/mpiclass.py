@@ -14,7 +14,7 @@ class MPI:
         self.size = self.comm.Get_size()
         self.loop_size = None
         self.mpi_info = 'Proc ' + str(self.rank+1)+' of ' + str(self.size)
-
+        self.print2file = None
 
     def mpi_fft_start(self, Ngrids):
         """Returns mpi4py-fft FFT object."""
@@ -114,13 +114,17 @@ class MPI:
         """Prints out using flush so it prints out immediately in an MPI
         setting."""
         print(*value, flush=True)
-
+        if self.print2file is not None:
+            print(*value, flush=True, file=self.print2file)
 
     def mpi_print_zero(self, *value):
         """Prints only at node rank = 0."""
         if self.rank == 0:
             self.mpi_print(*value)
 
+    def mpi_print2file(self, fname):
+        if self.rank == 0:
+            self.print2file = open(fname, "w")
 
     def send(self, data, to_rank=None, tag=11):
         """Sends data from current core to other specified or all cores.
@@ -318,4 +322,7 @@ class MPI:
 
     def end(self):
         """Ends MPI environment."""
+        if self.print2file is not None:
+            self.print2file.close()
+        self.wait()
         mpi.Finalize()

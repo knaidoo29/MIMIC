@@ -1,6 +1,26 @@
 
 subroutine interp_lin_float(x, f, lenx, xval, fillval, fval)
 
+  ! Interpolate a given function with linear interpolation with equal spacing.
+  !
+  ! Parameters
+  ! ----------
+  ! x : array
+  !   Coordinate values.
+  ! f : array
+  !   Function values.
+  ! lenx : int
+  !   Length of x.
+  ! xval : float
+  !   Values of linear interpolation.
+  ! fillval : float
+  !   Filler values for regions beyond the boundaries.
+  !
+  ! Returns
+  ! -------
+  ! fval : float
+  !   Interpolated value.
+
   implicit none
   integer, parameter :: dp = kind(1.d0)
 
@@ -32,6 +52,28 @@ end subroutine interp_lin_float
 
 subroutine interp_lin_array(x, f, lenx, xarr, lenxarr, fillval, farr)
 
+  ! Interpolate a given function with linear interpolation with equal spacing.
+  !
+  ! Parameters
+  ! ----------
+  ! x : array
+  !   Coordinate values.
+  ! f : array
+  !   Function values.
+  ! lenx : int
+  !   Length of x.
+  ! xarr : array
+  !   Values of linear interpolation.
+  ! lenxarr : int
+  !   Length of xarr
+  ! fillval : float
+  !   Filler values for regions beyond the boundaries.
+  !
+  ! Returns
+  ! -------
+  ! farr : float
+  !   Interpolated values.
+
   implicit none
   integer, parameter :: dp = kind(1.d0)
 
@@ -49,6 +91,26 @@ end subroutine interp_lin_array
 
 
 subroutine interp_log_float(logx, f, lenlogx, logxval, fmin, fmax, fval)
+
+  ! Interpolate a given function with linear interpolation with equal log spacing.
+  !
+  ! Parameters
+  ! ----------
+  ! logx : array
+  !   Coordinate values.
+  ! f : array
+  !   Function values.
+  ! lenlogx : int
+  !   Length of logx.
+  ! logxval : float
+  !   Values of linear interpolation.
+  ! fmin, fmax : float
+  !   Filler values for regions below and above the boundaries.
+  !
+  ! Returns
+  ! -------
+  ! fval : float
+  !   Interpolated value.
 
   implicit none
   integer, parameter :: dp = kind(1.d0)
@@ -82,6 +144,26 @@ end subroutine interp_log_float
 
 
 subroutine interp_log_array(logx, f, lenlogx, logxarr, lenlogxarr, fmin, fmax, farr)
+
+  ! Interpolate a given function with linear interpolation with equal log spacing.
+  !
+  ! Parameters
+  ! ----------
+  ! logx : array
+  !   Coordinate values.
+  ! f : array
+  !   Function values.
+  ! lenlogx : int
+  !   Length of logx.
+  ! logxarr : array
+  !   Values of linear interpolation.
+  ! fmin, fmax : float
+  !   Filler values for regions below and above the boundaries.
+  !
+  ! Returns
+  ! -------
+  ! farr : float
+  !   Interpolated values.
 
   implicit none
   integer, parameter :: dp = kind(1.d0)

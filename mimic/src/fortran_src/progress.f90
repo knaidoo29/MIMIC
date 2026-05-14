@@ -2,6 +2,21 @@
 
 subroutine progress_bar(i, total, lenchar, prefix, lenpre)
 
+  ! Progress bar.
+  !
+  ! Parameters
+  ! ----------
+  ! i : int
+  !   Index of the loop.
+  ! total : int
+  !   Total length of the loop.
+  ! lenchar : int
+  !   Length of the progress bar.
+  ! prefix : str
+  !   Prefix.
+  ! lenpre : int
+  !   Length of prefix.
+
   implicit none
 
   integer, intent(in) :: i, total, lenchar, lenpre

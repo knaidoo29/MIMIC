@@ -2,17 +2,6 @@ import subprocess
 import os.path
 
 
-def check_folder_exist(folder):
-    """Check folder exists.
-
-    Parameters
-    ----------
-    folder : str
-        Folder string.
-    """
-    return os.path.isdir(folder)
-
-
 def create_folder(root, path=None):
     """Creates a folder with the name 'root' either in the current folder if path is None or a specified path.
 

@@ -1,9 +1,8 @@
-
+# External functions and classes are copied here
 from . import ext
+
+# Main class and functions
 from . import main
+
+# Fortran source code, used to speed up computation
 from . import src
-from . import randoms
-#from . import read
-from . import theory
-from . import utils
-from . import write

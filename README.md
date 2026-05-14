@@ -3,23 +3,33 @@
 |               |                                       |
 |---------------|---------------------------------------|
 | Author        | Krishna Naidoo                        |
-| Version       | 1.0.1                                 |
+| Version       | 1.1.1                                 |
 | Repository    | https://github.com/knaidoo29/mimic    |
 | Documentation | https://mimic-doc.readthedocs.io/     |
 
 ## Dependencies
 
+* [`mpi4py`](https://mpi4py.readthedocs.io/)
 * [`numpy`](http://www.numpy.org/)
 * [`scipy`](https://scipy.org/)
-* [`mpi4py`](https://mpi4py.readthedocs.io/)
-* [`mpi4py-fft`](https://mpi4py-fft.readthedocs.io/)
+* [`PyYAML`](https://pyyaml.org/)
 
 Note, some functions have been copied from following libraries and are stored in the mimic/ext/ subdirectory.
-* [`MPIutils`](https://github.com/knaidoo29/MPIutils)
 * [`fiesta`](https://fiesta-docs.readthedocs.io/)
+* [`MPIutils`](https://github.com/knaidoo29/MPIutils) -- not to be confused with the pip installable mpiutils
 * [`shift`](https://shift-doc.readthedocs.io/)
 
 ## Installation
+
+MIMIC is based on an older installer ecosystem than modern python, so to install this properly you will need
+
+* Python 3.8
+* numpy 1.21 
+* scipy 1.7 
+* setuptools 58
+* mpi4py
+* gfortran
+* openmpi
 
 Clone the git repository and install `mimic` by running
 
@@ -27,6 +37,10 @@ Clone the git repository and install `mimic` by running
 python setup.py build
 python setup.py install
 ```
+## Pipeline
+
+`MIMIC` will be installed as a module, which can be called from any python script, notebook, etc. The actualy `MIMIC` script file, `mimic-run.py` is located in the scripts/ folder. This file can (and should) be copied to the directory which you want to compute `MIMIC` data products.
+
 
 ## Support
 

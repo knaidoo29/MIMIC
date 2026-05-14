@@ -79,7 +79,8 @@ def trilinear(fgrid, boxsize, x, y, z, origin=0., fill_value=np.nan, periodic=Tr
                                            xbox=xbox, ybox=ybox, zbox=zbox,
                                            perix=perix, periy=periy, periz=periz,
                                            ngridx=ngrids[0], ngridy=ngrids[1],
-                                           ngridz=ngrids[2], npart=npart)
+                                           ngridz=ngrids[2], ngridf=int(ngrids[0]*ngrids[1]*ngrids[2]),
+                                           npart=npart)
     else:
         # Some particles are outside the boundary.
         # create a mask for in and outside the box
@@ -120,7 +121,8 @@ def trilinear(fgrid, boxsize, x, y, z, origin=0., fill_value=np.nan, periodic=Tr
                                                  y=_y[cond], z=_z[cond], xbox=xbox,
                                                  ybox=ybox, zbox=zbox, perix=perix,
                                                  periy=periy, periz=periz, ngridx=ngrids[0],
-                                                 ngridy=ngrids[1], ngridz=ngrids[2], npart=npart)
+                                                 ngridy=ngrids[1], ngridz=ngrids[2], ngridf=int(ngrids[0]*ngrids[1]*ngrids[2]),
+                                                 npart=npart)
         # fill outside boundary with fill values.
         cond = np.where(mask == 0.)[0]
         f[cond] = fill_value

@@ -9,18 +9,30 @@ this_directory = path.abspath(path.dirname(__file__))
 with open(path.join(this_directory, 'README.md')) as f:
     long_description = f.read()
 
-ext1 = Extension(name='mimic.src.interp', sources=['mimic/src/interp.f90'])
-ext2 = Extension(name='mimic.src.progress', sources=['mimic/src/progress.f90'])
-ext3 = Extension(name='mimic.src.fast_eta', sources=['mimic/src/fast_eta.f90'])
+exts = []
 
-fiesta_ext1 = Extension(name='mimic.ext.fiesta.src.grid', sources=['mimic/ext/fiesta/src/grid.f90'])
-fiesta_ext2 = Extension(name='mimic.ext.fiesta.src.part2grid_pix', sources=['mimic/ext/fiesta/src/part2grid_pix.f90'])
-fiesta_ext3 = Extension(name='mimic.ext.fiesta.src.trilinear', sources=['mimic/ext/fiesta/src/trilinear.f90'])
+exts.append(Extension(name='mimic.ext.fiesta.src.grid',
+    sources=['mimic/ext/fiesta/src/grid.f90']))
+exts.append(Extension(name='mimic.ext.fiesta.src.part2grid_pix',
+    sources=['mimic/ext/fiesta/src/part2grid_pix.f90']))
+exts.append(Extension(name='mimic.ext.fiesta.src.trilinear',
+    sources=['mimic/ext/fiesta/src/trilinear.f90']))
 
-exts = [fiesta_ext1, fiesta_ext2, fiesta_ext3, ext1, ext2, ext3]
+exts.append(Extension(name='mimic.src.fortran_src.interp',
+    sources=['mimic/src/fortran_src/interp.f90']))
+exts.append(Extension(name='mimic.src.fortran_src.progress',
+    sources=['mimic/src/fortran_src/progress.f90']))
+exts.append(Extension(name='mimic.src.fortran_src.coords',
+    sources=['mimic/src/fortran_src/coords.f90']))
+exts.append(Extension(name='mimic.src.fortran_src.fast_correlate',
+     sources=['mimic/src/fortran_src/fast_correlate.f90']))
+exts.append(Extension(name='mimic.src.fortran_src.fast_correlate_eta',
+    sources=['mimic/src/fortran_src/fast_correlate_eta.f90']))
+exts.append(Extension(name='mimic.src.fortran_src.fast_correlate_inv',
+   sources=['mimic/src/fortran_src/fast_correlate_inv.f90']))
 
 setup(name = 'mimic',
-      version = "1.0.1",
+      version = "1.1.1",
       description       = "Model Independent cosMological constrained Initial Conditions",
       long_description  = long_description,
       long_description_content_type = 'text/markdown',
@@ -44,6 +56,7 @@ setup(name = 'mimic',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Topic :: Scientific/Engineering',
         'Topic :: Scientific/Engineering :: Astronomy',
         'Topic :: Scientific/Engineering :: Physics',
