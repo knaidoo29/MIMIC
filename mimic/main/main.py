@@ -2080,7 +2080,7 @@ class MIMIC:
         self.get_grid3D()
         self.get_kgrid3D()
         kmag = self.get_kgrid_mag()
-
+        
         if self.ICs["Seed"] is not None:
             self._print_zero(" - Construct white noise field with seed %i" % self.ICs["Seed"])
             WN = field.get_white_noise_3D(self.ICs["Seed"], self.siminfo["Ngrid"], MPI=self.MPI)
