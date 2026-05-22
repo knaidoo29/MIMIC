@@ -1,7 +1,7 @@
 import numpy as np
 
 from . import coords, Hz
-from .. import io, fortran_src
+from .. import io, src
 
 
 def _get_adot_phi(redshift):
@@ -104,7 +104,7 @@ def get_cc_float_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
     adot_phi = _get_adot_phi(redshift)
     adot_vel = _get_adot_vel(redshift, interp_Hz)
 
-    cc = fortran_src.get_cc_float(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
+    cc = src.get_cc_float(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
         ey1=ey1, ey2=ey2, ez1=ez1, ez2=ez2, type1=type1, type2=type2, adot_phi=adot_phi,
         adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
         psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
@@ -180,7 +180,7 @@ def get_cc_vector_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
         adot_phi = _get_adot_phi(redshift)
         adot_vel = _get_adot_vel(redshift, interp_Hz)
 
-        cc = fortran_src.get_cc_array2(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
+        cc = src.get_cc_array2(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
             ey1=ey1, ey2=ey2, ez1=ez1, ez2=ez2, type1=type1, type2=type2, adot_phi=adot_phi,
             adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
             psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
@@ -199,7 +199,7 @@ def get_cc_vector_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
         adot_phi = _get_adot_phi(redshift)
         adot_vel = _get_adot_vel(redshift, interp_Hz)
 
-        cc = fortran_src.get_cc_array1(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
+        cc = src.get_cc_array1(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
             ey1=ey1, ey2=ey2, ez1=ez1, ez2=ez2, type1=type1, type2=type2, adot_phi=adot_phi,
             adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
             psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
@@ -281,7 +281,7 @@ def get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
     adot_phi = _get_adot_phi(redshift)
     adot_vel = _get_adot_vel(redshift, interp_Hz)
 
-    cc = fortran_src.get_cc_arrays(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
+    cc = src.get_cc_arrays(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2, ex1=ex1, ex2=ex2,
         ey1=ey1, ey2=ey2, ez1=ez1, ez2=ez2, type1=type1, type2=type2, adot_phi=adot_phi,
         adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
         psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
@@ -380,14 +380,14 @@ def get_corr_dot_eta_fast(x1, xc, y1, yc, z1, zc, ex1, exc, ey1, eyc, ez1, ezc,
     adot_vel = _get_adot_vel(redshift, interp_Hz)
 
     if io.isscalar(ex1):
-        field = fortran_src.corr_dot_eta(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
+        field = src.corr_dot_eta(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
             ey1=ey1, eyc=eyc, ez1=ez1, ezc=ezc, type1=type1, typec=typec, adot_phi=adot_phi,
             adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
             psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
             boxsize=boxsize, lenr=len(_r), lenx1=len(x1), lenxc=len(xc), eta=eta, mpi_rank=mpi_rank,
             lenpro=lenpro, lenpre=lenpre, prefix=prefix)
     else:
-        field = fortran_src.corr_dot_eta_array(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
+        field = src.corr_dot_eta_array(x1=x1, xc=xc, y1=y1, yc=yc, z1=z1, zc=zc, ex1=ex1, exc=exc,
             ey1=ey1, eyc=eyc, ez1=ez1, ezc=ezc, type1=type1, typec=typec, adot_phi=adot_phi,
             adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
             psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
@@ -494,7 +494,7 @@ def get_corr1_dot_inv_dot_corr2_fast(x1, x2, xc, y1, y2, yc, z1, z2, zc, exi, ex
     adot_vel = _get_adot_vel(redshift, interp_Hz)
 
     if io.isscalar(exi):
-        field = fortran_src.corr1_dot_inv_dot_corr2(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
+        field = src.corr1_dot_inv_dot_corr2(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
             exi=exi, eyi=eyi, ezi=ezi, xc=xc, yc=yc, zc=zc, exc=exc, eyc=eyc, ezc=ezc,
             type1=type1, type2=type2, typec=typec, adot_phi=adot_phi, adot_vel=adot_vel,
             logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp, psit_pp=psiT_pp,
@@ -502,7 +502,7 @@ def get_corr1_dot_inv_dot_corr2_fast(x1, x2, xc, y1, y2, yc, z1, z2, zc, exi, ex
             boxsize=boxsize, lenr=len(_r), lenxi=len(x1), lenxc=len(xc), inv=inv.flatten(),
             mpi_rank=mpi_rank, lenpro=lenpro, lenpre=lenpre, prefix=prefix)
     else:
-        field = fortran_src.corr1_dot_inv_dot_corr2_array(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
+        field = src.corr1_dot_inv_dot_corr2_array(x1=x1, x2=x2, y1=y1, y2=y2, z1=z1, z2=z2,
             exi=exi, eyi=eyi, ezi=ezi, xc=xc, yc=yc, zc=zc, exc=exc, eyc=eyc, ezc=ezc,
             type1=type1, type2=type2, typec=typec, adot_phi=adot_phi, adot_vel=adot_vel,
             logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp, psit_pp=psiT_pp,

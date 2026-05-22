@@ -6,7 +6,8 @@ import numpy as np
 
 from scipy.interpolate import interp1d
 
-from ..ext import fiesta, shift
+import shift
+import fiesta
 
 from ..src import field, io, theory
 

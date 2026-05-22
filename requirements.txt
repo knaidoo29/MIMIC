@@ -1,0 +1,6 @@
+fiesta-pkg
+numba
+numpy
+PyYAML
+scipy
+shift-fft
