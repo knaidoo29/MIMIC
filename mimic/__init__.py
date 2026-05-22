@@ -1,6 +1,3 @@
-# External functions and classes are copied here
-from . import ext
-
 # Main class and functions
 from . import main
 

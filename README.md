@@ -31,7 +31,13 @@ import mimic
 
 ## Pipeline
 
-`MIMIC` will be installed as a module, which can be called from any python script or notebook. The `MIMIC` script file, `mimic-run.py` is located in the `scripts/` folder. This file can (and should) be copied to the directory in which you will be running analyses, which you want to compute `MIMIC` data products.
+`MIMIC` will be installed as a module, which can be called from any python script or notebook. The `MIMIC` script file, `mimic-run.py` is located in the `scripts/` folder. This file can (and should) be copied to the directory in which you will be running analyses, which you want to compute `MIMIC` data products. This can be run 
+
+```bash
+mpirun -n 4 python mimic-run.py params.yaml
+```
+
+where `4` is the number of processors and `params.yaml` is the parameter file.
 
 ## Support
 

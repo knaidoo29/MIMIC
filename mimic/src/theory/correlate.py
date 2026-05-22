@@ -285,7 +285,7 @@ def get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
         ey1=ey1, ey2=ey2, ez1=ez1, ez2=ez2, type1=type1, type2=type2, adot_phi=adot_phi,
         adot_vel=adot_vel, logr=np.log10(_r), xi=xi, zeta_p=zeta_p, zeta_u=zeta_u, psir_pp=psiR_pp,
         psit_pp=psiT_pp, psir_pu=psiR_pu, psit_pu=psiT_pu, psir_uu=psiR_uu, psit_uu=psiT_uu,
-        boxsize=boxsize, lenr=len(_r), lenx=len(x1))
+        boxsize=boxsize)
 
     x1, y1, z1 = x1.reshape(_shape), y1.reshape(_shape), z1.reshape(_shape)
     x2, y2, z2 = x2.reshape(_shape), y2.reshape(_shape), z2.reshape(_shape)
