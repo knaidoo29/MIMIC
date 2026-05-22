@@ -1,5 +1,4 @@
 import numpy as np
-from ...ext import shift
 
 
 def get_white_noise(seed, *args):

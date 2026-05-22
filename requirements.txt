@@ -1,5 +1,6 @@
-mpi4py
-mpi4py-fft
+fiesta-pkg
+numba
 numpy
 PyYAML
 scipy
+shift-fft

@@ -11,9 +11,9 @@ environ['NUMEXPR_NUM_THREADS'] = N_THREADS
 import sys
 import os.path
 import numpy as np
+from shift import mpiutils
 
 from mimic.main import MIMIC
-from mimic.ext import mpiutils
 
 MPI = mpiutils.MPI()
 

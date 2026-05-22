@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.integrate import simpson
 
-from ...ext import shift
+import shift
 
 
 def get_sigma_8(kh, pk):

@@ -6,7 +6,8 @@ import numpy as np
 
 from scipy.interpolate import interp1d
 
-from ..ext import fiesta, shift
+import shift
+import fiesta
 
 from ..src import field, io, theory
 
@@ -222,7 +223,6 @@ class MIMIC:
         self._lenpro = 20
         # output
         self.fname_prefix = None
-        self.logfile = None
 
     def start(self):
         """Starts the run and timers."""
@@ -232,16 +232,9 @@ class MIMIC:
     # Utility functions --------------------------------------------------------
 
     def _print_zero(self, *value):
-        if self.logfile is None:
-            i = 0
-            while io.isfile("mimic_output_%i.txt"%i):
-                i += 1
-            self.logfile = "mimic_output_%i.txt"%i
-            self.MPI.mpi_print2file(self.logfile)
         """Print at rank=0."""
         if self.nompi is None:
             print(*value, flush=True)
-            print(*value, **{"file": self.logfile})
         else:
             self.MPI.mpi_print_zero(*value)
 
@@ -649,6 +642,27 @@ class MIMIC:
         self._break4error()
         self._read_params(self.params)
         self._break4error()
+
+    # MPI utility functions -------------------------------------------------------
+
+    def MPI_create_split_ndarray(self, MPI, arrays_nd, whichaxis):
+        """Split a list of arrays based on the data partitioning scheme."""
+        split_arrays = []
+        for i in range(0, len(arrays_nd)):
+            _array = arrays_nd[i]
+            if not whichaxis[i]:
+                _array = MPI.split_array(_array)
+                split_arrays.append(_array)
+            else:
+                split_arrays.append(_array)
+        return split_arrays
+
+
+    def MPI_create_split_ndgrid(self, MPI, arrays_nd, whichaxis):
+        """Create a partitioned gridded data set."""
+        split_arrays = self.MPI_create_split_ndarray(MPI, arrays_nd, whichaxis)
+        split_grid = np.meshgrid(*split_arrays, indexing='ij')
+        return split_grid
 
     # Theory Calculations ------------------------------------------------------
 
@@ -1130,15 +1144,15 @@ class MIMIC:
         self._print_zero(" =================================")
         self._print_zero()
 
-        x1, x2 = self.MPI.create_split_ndgrid([self.cons_x, self.cons_x], [False, True])
-        y1, y2 = self.MPI.create_split_ndgrid([self.cons_y, self.cons_y], [False, True])
-        z1, z2 = self.MPI.create_split_ndgrid([self.cons_z, self.cons_z], [False, True])
+        x1, x2 = self.MPI_create_split_ndgrid(self.MPI, [self.cons_x, self.cons_x], [False, True])
+        y1, y2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_y, self.cons_y], [False, True])
+        z1, z2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_z, self.cons_z], [False, True])
 
-        ex1, ex2 = self.MPI.create_split_ndgrid([self.cons_ex, self.cons_ex], [False, True])
-        ey1, ey2 = self.MPI.create_split_ndgrid([self.cons_ey, self.cons_ey], [False, True])
-        ez1, ez2 = self.MPI.create_split_ndgrid([self.cons_ez, self.cons_ez], [False, True])
+        ex1, ex2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ex, self.cons_ex], [False, True])
+        ey1, ey2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ey, self.cons_ey], [False, True])
+        ez1, ez2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ez, self.cons_ez], [False, True])
 
-        type1, type2 = self.MPI.create_split_ndgrid([self.cons_c_type, self.cons_c_type], [False, True])
+        type1, type2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_c_type, self.cons_c_type], [False, True])
 
         self._print_zero(" - Compute constraint-constraint covariance matrix in parallel")
 
@@ -1843,8 +1857,7 @@ class MIMIC:
         self.get_grid3D()
         self.get_kgrid3D()
         kmag = self.get_kgrid_mag()
-        densk = shift.cart.mpi_fft3D(dens, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.MPI)
+        densk = shift.cart.mpi_fft3D(dens, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
         psi_kx = self.complex_zeros(self.k_shape)
         psi_ky = self.complex_zeros(self.k_shape)
         psi_kz = self.complex_zeros(self.k_shape)
@@ -1852,12 +1865,9 @@ class MIMIC:
         psi_kx[cond] = densk[cond] * 1j * self.kx3D[cond]/(kmag[cond]**2.)
         psi_ky[cond] = densk[cond] * 1j * self.ky3D[cond]/(kmag[cond]**2.)
         psi_kz[cond] = densk[cond] * 1j * self.kz3D[cond]/(kmag[cond]**2.)
-        psi_x = shift.cart.mpi_ifft3D(psi_kx, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.MPI)
-        psi_y = shift.cart.mpi_ifft3D(psi_ky, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.MPI)
-        psi_z = shift.cart.mpi_ifft3D(psi_kz, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.MPI)
+        psi_x = shift.cart.mpi_ifft3D(psi_kx, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+        psi_y = shift.cart.mpi_ifft3D(psi_ky, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+        psi_z = shift.cart.mpi_ifft3D(psi_kz, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
         return psi_x, psi_y, psi_z
 
 
@@ -1873,12 +1883,9 @@ class MIMIC:
             self.get_kgrid3D()
             kmag = self.get_kgrid_mag()
 
-            vel_kx = shift.cart.mpi_fft3D(psi_x, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
-            vel_ky = shift.cart.mpi_fft3D(psi_y, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
-            vel_kz = shift.cart.mpi_fft3D(psi_z, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
+            vel_kx = shift.cart.mpi_fft3D(psi_x, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+            vel_ky = shift.cart.mpi_fft3D(psi_y, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+            vel_kz = shift.cart.mpi_fft3D(psi_z, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
 
             cond = np.where(kmag != 0.)
             fk = self._get_growth_f(z0, kmag=kmag[cond])
@@ -1886,12 +1893,9 @@ class MIMIC:
             vel_ky[cond] *= adot*fk
             vel_kz[cond] *= adot*fk
 
-            vel_x = shift.cart.mpi_ifft3D(vel_kx, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
-            vel_y = shift.cart.mpi_ifft3D(vel_ky, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
-            vel_z = shift.cart.mpi_ifft3D(vel_kz, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
+            vel_x = shift.cart.mpi_ifft3D(vel_kx, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+            vel_y = shift.cart.mpi_ifft3D(vel_ky, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+            vel_z = shift.cart.mpi_ifft3D(vel_kz, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
 
         else:
             fz = self._get_growth_f(z0)
@@ -1962,14 +1966,27 @@ class MIMIC:
             data[:,0], data[:,1], data[:,2], data[:,3], data[:,4], data[:,5], data[:,6], data[:,7]
 
         self._print_zero(" - Interpolating displacement Psi at constraint positions")
-
+        
         if len(cons_x) != 0:
+
+            cons_x = np.asarray(cons_x, dtype=np.float64)
+            cons_y = np.asarray(cons_y, dtype=np.float64)
+            cons_z = np.asarray(cons_z, dtype=np.float64)
+
+            cons_ex = np.asarray(cons_ex, dtype=np.float64)
+            cons_ey = np.asarray(cons_ey, dtype=np.float64)
+            cons_ez = np.asarray(cons_ez, dtype=np.float64)
+
+            cons_c = np.asarray(cons_c, dtype=np.float64)
+            cons_c_err = np.asarray(cons_c_err, dtype=np.float64)
+
             cons_psi_x = fiesta.interp.trilinear(psi_x, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
             cons_psi_y = fiesta.interp.trilinear(psi_y, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
             cons_psi_z = fiesta.interp.trilinear(psi_z, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
+
             # x_shape = self.x_shape
             # dx = (xmax-xmin)/(x_shape[0]+2)
             # ix = np.floor((cons_x - xmin)/dx).astype('int')
@@ -2104,8 +2121,7 @@ class MIMIC:
 
         self._print_zero(" - FFT white noise field")
 
-        WN_k = shift.cart.mpi_fft3D(WN, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.MPI)
+        WN_k = shift.cart.mpi_fft3D(WN, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
 
         self._print_zero(" - Colour white noise field to get density field")
 
@@ -2114,8 +2130,7 @@ class MIMIC:
 
         self._print_zero(" - iFFT density field")
 
-        self.dens = shift.cart.mpi_ifft3D(dens_RR_k, self.x_shape, self.siminfo["Boxsize"],
-            self.siminfo["Ngrid"], self.MPI)
+        self.dens = shift.cart.mpi_ifft3D(dens_RR_k, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
 
         self.save_dens("RR")
 
@@ -2138,14 +2153,12 @@ class MIMIC:
         if self.cosmo["ScaleDepGrowth"]:
             self.get_kgrid3D()
             kmag = self.get_kgrid_mag()
-            dens_k = shift.cart.mpi_fft3D(dens, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
+            dens_k = shift.cart.mpi_fft3D(dens, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
             cond = np.where(kmag != 0.)
             Dk = self._get_growth_D(z0, kmag=kmag[cond])
             Dk0 = self._get_growth_D(z1, kmag=kmag[cond])
             dens_k[cond] = (Dk/Dk0)*dens_k[cond]
-            densz = shift.cart.mpi_ifft3D(dens_k, self.x_shape, self.siminfo["Boxsize"],
-                self.siminfo["Ngrid"], self.MPI)
+            densz = shift.cart.mpi_ifft3D(dens_k, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
         else:
             Dz = self._get_growth_D(z0)
             Dz0 = self._get_growth_D(z1)
@@ -2160,15 +2173,15 @@ class MIMIC:
         self._print_zero(" =====================")
         self._print_zero()
 
-        # x1, x2 = self.MPI.create_split_ndgrid([self.cons_x, self.cons_x], [False, True])
-        # y1, y2 = self.MPI.create_split_ndgrid([self.cons_y, self.cons_y], [False, True])
-        # z1, z2 = self.MPI.create_split_ndgrid([self.cons_z, self.cons_z], [False, True])
+        # x1, x2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_x, self.cons_x], [False, True])
+        # y1, y2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_y, self.cons_y], [False, True])
+        # z1, z2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_z, self.cons_z], [False, True])
         #
-        # ex1, ex2 = self.MPI.create_split_ndgrid([self.cons_ex, self.cons_ex], [False, True])
-        # ey1, ey2 = self.MPI.create_split_ndgrid([self.cons_ey, self.cons_ey], [False, True])
-        # ez1, ez2 = self.MPI.create_split_ndgrid([self.cons_ez, self.cons_ez], [False, True])
+        # ex1, ex2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ex, self.cons_ex], [False, True])
+        # ey1, ey2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ey, self.cons_ey], [False, True])
+        # ez1, ez2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ez, self.cons_ez], [False, True])
         #
-        # type1, type2 = self.MPI.create_split_ndgrid([self.cons_c_type, self.cons_c_type], [False, True])
+        # type1, type2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_c_type, self.cons_c_type], [False, True])
         #
         # self._print_zero(" - Compute vel-vel covariance matrix in parallel")
         #
@@ -2239,16 +2252,29 @@ class MIMIC:
         data = self.SBX.distribute()
         cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez, cons_c, cons_c_err = \
             data[:,0], data[:,1], data[:,2], data[:,3], data[:,4], data[:,5], data[:,6], data[:,7]
-
+        
         self._print_zero(" - Interpolating velocity at constraint positions")
 
         if len(cons_x) != 0:
+
+            cons_x = np.asarray(cons_x, dtype=np.float64)
+            cons_y = np.asarray(cons_y, dtype=np.float64)
+            cons_z = np.asarray(cons_z, dtype=np.float64)
+
+            cons_ex = np.asarray(cons_ex, dtype=np.float64)
+            cons_ey = np.asarray(cons_ey, dtype=np.float64)
+            cons_ez = np.asarray(cons_ez, dtype=np.float64)
+
+            cons_c = np.asarray(cons_c, dtype=np.float64)
+            cons_c_err = np.asarray(cons_c_err, dtype=np.float64)
+
             cons_vel_x = fiesta.interp.trilinear(vel_x, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
             cons_vel_y = fiesta.interp.trilinear(vel_y, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
             cons_vel_z = fiesta.interp.trilinear(vel_z, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
                 cons_x, cons_y, cons_z, origin=[xmin, 0., 0.], periodic=[False, True, True])
+            
             cons_c_RR = cons_vel_x*cons_ex + cons_vel_y*cons_ey + cons_vel_z*cons_ez
             cons_data = np.column_stack([cons_x, cons_y, cons_z, cons_ex, cons_ey, cons_ez, cons_c, cons_c_err, cons_c_RR])
         else:
