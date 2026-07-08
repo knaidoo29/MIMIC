@@ -24,23 +24,23 @@ def interp_lin_float(x, f, xval, fillval):
     """
     lenx = x.shape[0]
     xmin = x[0]
-    xmax = x[lenx - 1]
+    xmax = x[-1]
     dx = (xmax - xmin) / (lenx - 1)
 
     if xval < xmin:
         return fillval
-    if xval > xmax:
+    elif xval > xmax:
         return fillval
-
-    ind = int(np.floor((xval - xmin) / dx))
-    if ind >= lenx - 1:
-        return f[lenx - 1]
-
-    x1 = x[ind]
-    x2 = x[ind + 1]
-    f1 = f[ind]
-    f2 = f[ind + 1]
-    return f1 + (f2 - f1) * (xval - x1) / (x2 - x1)
+    else:
+        ind = int(np.floor((xval - xmin) / dx))
+        if ind >= lenx - 1:
+            return f[-1]
+        else:
+            x1 = x[ind]
+            x2 = x[ind + 1]
+            f1 = f[ind]
+            f2 = f[ind + 1]
+            return f1 + (f2 - f1) * (xval - x1) / (x2 - x1)
 
 
 @njit
@@ -94,23 +94,23 @@ def interp_log_float(logx, f, logxval, fmin, fmax):
     """
     lenx = logx.shape[0]
     logxmin = logx[0]
-    logxmax = logx[lenx - 1]
+    logxmax = logx[-1]
     dlogx = (logxmax - logxmin) / (lenx - 1)
 
     if logxval <= logxmin:
         return fmin
-    if logxval >= logxmax:
+    elif logxval >= logxmax:
         return fmax
-
-    ind = int(np.floor((logxval - logxmin) / dlogx))
-    if ind >= lenx - 1:
-        return fmax
-
-    logx1 = logx[ind]
-    logx2 = logx[ind + 1]
-    f1 = f[ind]
-    f2 = f[ind + 1]
-    return f1 + (f2 - f1) * (logxval - logx1) / (logx2 - logx1)
+    else:
+        ind = int(np.floor((logxval - logxmin) / dlogx))
+        if ind >= lenx - 1:
+            return fmax
+        else:
+            logx1 = logx[ind]
+            logx2 = logx[ind + 1]
+            f1 = f[ind]
+            f2 = f[ind + 1]
+            return f1 + (f2 - f1) * (logxval - logx1) / (logx2 - logx1)
 
 
 @njit

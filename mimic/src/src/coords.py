@@ -18,12 +18,13 @@ def distance_1d_float(rx, boxsize):
     float
         Wrapped separation in the range [-boxsize/2, boxsize/2].
     """
-    if rx < -boxsize / 2.0:
-        return rx + boxsize
-    elif rx > boxsize / 2.0:
-        return rx - boxsize
-    else:
-        return rx
+    # if rx <= -boxsize / 2.0:
+    #     newrx = rx + boxsize
+    # elif rx >= boxsize / 2.0:
+    #     newrx = rx - boxsize
+    # else:
+    newrx = rx
+    return newrx
 
 
 @njit
@@ -46,7 +47,7 @@ def distance_3d_float(rx, ry, rz, boxsize):
     newrx = distance_1d_float(rx, boxsize)
     newry = distance_1d_float(ry, boxsize)
     newrz = distance_1d_float(rz, boxsize)
-    newr = np.sqrt(newrx * newrx + newry * newry + newrz * newrz)
+    newr = np.sqrt(newrx**2 + newry**2 + newrz**2)
     return newr, newrx, newry, newrz
 
 
@@ -64,8 +65,8 @@ def get_vec_norm_float(x, y, z):
     tuple
         Normalized vector components (nx, ny, nz).
     """
-    r = np.sqrt(x * x + y * y + z * z)
+    r = np.sqrt(x**2 + y**2 + z**2)
     if r == 0.0:
         c = 1.0 / np.sqrt(3.0)
         return c, c, c
-    return x / r, y / r, z / r
+    return x/r, y/r, z/r

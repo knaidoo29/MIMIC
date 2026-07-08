@@ -58,3 +58,29 @@ def distance_3D(x1, x2, y1, y2, z1, z2, boxsize=None, return_axis_dist=False):
         return rx, ry, rz, r
     else:
         return r
+
+
+def stretch_sin_backward(xcos, boxsize):
+    """Stretch a cosine grid to a uniform grid using a sine function.
+    
+    Parameters
+    ----------
+    xcos : float/array
+        Cosine grid coordinates.
+    boxsize : float
+        Size of the periodic box.
+    """
+    return boxsize*(np.sin(np.pi*xcos - np.pi/2.)+1)/2.
+
+
+def stretch_sin_forward(x, boxsize):
+    """Stretch a uniform grid to a cosine grid using an arcsine function.
+
+    Parameters
+    ----------
+    x : float/array
+        Uniform grid coordinates.
+    boxsize : float
+        Size of the periodic box.
+    """
+    return np.arcsin(2*x/boxsize-1.)/np.pi + 1./2.

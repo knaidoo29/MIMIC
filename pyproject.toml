@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mimic"
-description = "MIMIC: Model Independent cosMological constrained Initial Conditions generator for cosmological simulations."
+description = "MIMIC: MIMetic Initial Conditions generator for cosmological simulations."
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "Krishna Naidoo", email = "krishna.naidoo.11@ucl.ac.uk"}]
@@ -51,7 +51,7 @@ version = {file = "VERSION"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["build", "docs", "tests", "tutorials"]
+exclude = ["build", "build.*", "dist*", "*.egg-info", "docs*", "tests*", "tutorials*"]
 
 [tool.setuptools]
 include-package-data = true
