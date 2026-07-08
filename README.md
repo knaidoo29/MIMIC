@@ -1,4 +1,4 @@
-# MIMIC: Multiscale Implementation of Mimetic Initial Conditions
+# MIMIC: MIMetic Initial Conditions
 
 `MIMIC` constructs constrained initial conditions and Wiener filter reconstruction from a given set of peculiar velocity constraints and user defined expansion history, power spectra and growth functions. The code is written in `python`, with `MPI` enabled through `mpi4py`, and written with `numba` JIT compiled code for speed.
 

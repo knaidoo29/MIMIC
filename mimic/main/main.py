@@ -3207,6 +3207,7 @@ class MIMIC:
         self._print_zero()
         self.save_dens("CR")
 
+
     # Initial condition functions ----------------------------------------------
 
     def get_particle_mass(self):
@@ -3294,17 +3295,12 @@ class MIMIC:
         pos = np.column_stack([pos_x, pos_y, pos_z])
         vel = np.column_stack([vel_x, vel_y, vel_z])
 
-        # self.MPI.mpi_print(" -- Processor - " + str(self.rank) + " particle position shape " + str(np.shape(pos)))
-        # self.MPI.mpi_print(" -- Processor - " + str(self.rank) + " particle velocity shape " + str(np.shape(vel)))
-        # self.MPI.wait()
-
         fname = self._get_fname_prefix() + 'IC.%i' % self.rank
 
         self._print_zero()
         self._print_zero(" - Saving ICs in Gadget format to %s[0-%i]"%(fname[:-1], self.MPI.size-1))
 
-        io.save_gadget(fname, header, pos, vel, ic_format=self.ICs['gadget_format'],
-            single=True, id_offset=part_id_offsets[self.rank])
+        io.save_gadget(fname, header, pos, vel, ic_format=self.ICs['gadget_format'], single=True, id_offset=part_id_offsets[self.rank])
 
 
     # Main pipeline running ----------------------------------------------------
@@ -3380,7 +3376,6 @@ class MIMIC:
 
         Prep_str = " -> Theory Calculations       = "
         WF___str = " -> Wiener Filter             = "
-        ConWFstr = " -> Constraint Wiener Filter  = "
         RZA__str = " -> Reverse Zeldovich         = "
         RR___str = " -> Random Realisation        = "
         PCR__str = " -> CR Preprocessing          = "
@@ -3392,9 +3387,6 @@ class MIMIC:
 
         if self.what2run["WF"]:
             self._print_time(WF___str, self.time["WF_End"] - self.time["WF_Start"])
-        
-        if self.what2run["WF_Cons"]:
-            self._print_time(ConWFstr, self.time["WF_Cons_End"] - self.time["WF_Cons_Start"])
 
         if self.what2run["RZA"]:
             self._print_time(RZA__str, self.time["RZA_End"] - self.time["RZA_Start"])
