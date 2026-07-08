@@ -31,9 +31,7 @@ def get_dd_float(x1, x2, y1, y2, z1, z2, logr, xi, boxsize):
     ry = y2 - y1
     rz = z2 - z1
     newr, newrx, newry, newrz = distance_3d_float(rx, ry, rz, boxsize)
-    if newr <= 0.0:
-        return xi[0]
-    return interp_log_float(logr, xi, np.log10(newr), xi[0], xi[xi.shape[0] - 1])
+    return interp_log_float(logr, xi, np.log10(newr), xi[0], xi[-1])
 
 
 @njit
@@ -67,16 +65,13 @@ def get_dp_float(x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, logr, zeta, boxsize):
     rz = z2 - z1
     newr, newrx, newry, newrz = distance_3d_float(rx, ry, rz, boxsize)
     nrx, nry, nrz = get_vec_norm_float(newrx, newry, newrz)
-    if newr <= 0.0:
-        zeta_val = zeta[0]
-    else:
-        zeta_val = interp_log_float(logr, zeta, np.log10(newr), zeta[0], zeta[zeta.shape[0] - 1])
-    return -adot * zeta_val * (ex * nrx + ey * nry + ez * nrz)
+    zeta_val = interp_log_float(logr, zeta, np.log10(newr), zeta[0], zeta[-1])
+    return -adot*zeta_val*(ex*nrx + ey*nry + ez*nrz)
 
 
 @njit
 def get_pd_float(x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, logr, zeta, boxsize):
-    """Compute the displacement/velocity-density cross-correlation.
+    """Compute the density-displacement/velocity cross-correlation.
 
     Parameters
     ----------
@@ -98,23 +93,23 @@ def get_pd_float(x1, x2, y1, y2, z1, z2, ex, ey, ez, adot, logr, zeta, boxsize):
     Returns
     -------
     float
-        Displacement/velocity-density correlation value.
+        Density-displacement/velocity cross-correlation value.
     """
     rx = x1 - x2
     ry = y1 - y2
     rz = z1 - z2
     newr, newrx, newry, newrz = distance_3d_float(rx, ry, rz, boxsize)
     nrx, nry, nrz = get_vec_norm_float(newrx, newry, newrz)
-    if newr <= 0.0:
-        zeta_val = zeta[0]
-    else:
-        zeta_val = interp_log_float(logr, zeta, np.log10(newr), zeta[0], zeta[zeta.shape[0] - 1])
-    return -adot * zeta_val * (ex * nrx + ey * nry + ez * nrz)
+    zeta_val = interp_log_float(logr, zeta, np.log10(newr), zeta[0], zeta[-1])
+    return -adot*zeta_val*(ex*nrx + ey*nry + ez*nrz)
 
 
 @njit
-def get_pp_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-                 adot2, logr, psir, psit, boxsize):
+def get_pp_float(
+    x1, x2, y1, y2, z1, z2, 
+    ex1, ex2, ey1, ey2, ez1, ez2,
+    adot2, logr, psir, psit, boxsize
+):
     """Compute the pairwise displacement/velocity autocorrelation.
 
     Parameters
@@ -144,36 +139,43 @@ def get_pp_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
     rx = x2 - x1
     ry = y2 - y1
     rz = z2 - z1
+
     newr, newrx, newry, newrz = distance_3d_float(rx, ry, rz, boxsize)
     nrx, nry, nrz = get_vec_norm_float(newrx, newry, newrz)
-    if newr <= 0.0:
-        pr = psir[0]
-        pt = psit[0]
-    else:
-        pr = interp_log_float(logr, psir, np.log10(newr), psir[0], psir[psir.shape[0] - 1])
-        pt = interp_log_float(logr, psit, np.log10(newr), psit[0], psit[psit.shape[0] - 1])
+
+    pr = interp_log_float(logr, psir, np.log10(newr), psir[0], psir[-1])
+    pt = interp_log_float(logr, psit, np.log10(newr), psit[0], psit[-1])
+
     p1 = pt
     p2 = pr - pt
-    pp_xx = p1 + p2 * nrx * nrx
-    pp_yy = p1 + p2 * nry * nry
-    pp_zz = p1 + p2 * nrz * nrz
-    pp_xy = p2 * nrx * nry
-    pp_xz = p2 * nrx * nrz
-    pp_yz = p2 * nry * nrz
-    pp_val = adot2 * (
-        ex1 * (pp_xx * ex2 + pp_xy * ey2 + pp_xz * ez2) +
-        ey1 * (pp_xy * ex2 + pp_yy * ey2 + pp_yz * ez2) +
-        ez1 * (pp_xz * ex2 + pp_yz * ey2 + pp_zz * ez2)
-    )
+
+    pp_xx = p1 + p2*nrx*nrx
+    pp_yy = p1 + p2*nry*nry
+    pp_zz = p1 + p2*nrz*nrz
+
+    pp_xy = p2*nrx*nry
+    pp_xz = p2*nrx*nrz
+    pp_yx = p2*nry*nrx
+    pp_yz = p2*nry*nrz
+    pp_zx = p2*nrz*nrx
+    pp_zy = p2*nrz*nry
+
+    pp_x = ex1*(pp_xx*ex2 + pp_xy*ey2 + pp_xz*ez2)
+    pp_y = ey1*(pp_yx*ex2 + pp_yy*ey2 + pp_yz*ez2)
+    pp_z = ez1*(pp_zx*ex2 + pp_zy*ey2 + pp_zz*ez2)
+    pp_val = adot2*(pp_x + pp_y + pp_z)
+
     if newr == 0.0:
-        pp_val = adot2 * pt * (ex1 * ex2 + ey1 * ey2 + ez1 * ez2)
+        pp_val = adot2*pt*(ex1*ex2 + ey1*ey2 + ez1*ez2)
     return pp_val
 
 
 @njit
-def get_cc_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-                 type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
-                 psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu, boxsize):
+def get_cc_float(
+    x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+    type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
+    psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu, boxsize
+):
     """Compute the full correlation between two points for a given type pair.
 
     Parameters
@@ -227,10 +229,11 @@ def get_cc_float(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
 
 
 @njit
-def get_cc_array1(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-                  type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
-                  psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu,
-                  boxsize):
+def get_cc_array1(
+    x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+    type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
+    psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu, boxsize
+):
     """Compute correlations for an array of point 1 values against a single point 2.
 
     Parameters
@@ -272,10 +275,11 @@ def get_cc_array1(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
 
 
 @njit
-def get_cc_array2(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-                  type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
-                  psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu,
-                  boxsize):
+def get_cc_array2(
+    x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+    type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
+    psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu, boxsize
+):
     """Compute correlations for a single point 1 against an array of point 2 values.
 
     Parameters
@@ -317,10 +321,11 @@ def get_cc_array2(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
 
 
 @njit
-def get_cc_arrays(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-                  type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
-                  psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu,
-                  boxsize):
+def get_cc_arrays(
+    x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
+    type1, type2, adot_phi, adot_vel, logr, xi, zeta_p, zeta_u,
+    psir_pp, psit_pp, psir_pu, psit_pu, psir_uu, psit_uu, boxsize
+):
     """Compute correlations for matching arrays of points.
 
     Parameters
@@ -350,10 +355,11 @@ def get_cc_arrays(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
     lenx = x1.shape[0]
     cc = np.empty(lenx, dtype=np.float64)
     for i in range(lenx):
-        cc[i] = get_cc_float(x1[i], x2[i], y1[i], y2[i], z1[i], z2[i],
-                             ex1[i], ex2[i], ey1[i], ey2[i], ez1[i], ez2[i],
-                             type1[i], type2[i], adot_phi, adot_vel,
-                             logr, xi, zeta_p, zeta_u,
-                             psir_pp, psit_pp, psir_pu, psit_pu,
-                             psir_uu, psit_uu, boxsize)
+        cc[i] = get_cc_float(
+            x1[i], x2[i], y1[i], y2[i], z1[i], z2[i],
+            ex1[i], ex2[i], ey1[i], ey2[i], ez1[i], ez2[i],
+            type1[i], type2[i], adot_phi, adot_vel,
+            logr, xi, zeta_p, zeta_u, psir_pp, psit_pp, 
+            psir_pu, psit_pu, psir_uu, psit_uu, boxsize
+        )
     return cc

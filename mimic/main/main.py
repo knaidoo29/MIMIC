@@ -1,10 +1,12 @@
 import os
 import sys
 import time
+from typing import Union
 
 import numpy as np
 
 from scipy.interpolate import interp1d
+from scipy.sparse.linalg import LinearOperator, gmres, cg, minres, bicgstab
 
 import shift
 import fiesta
@@ -22,7 +24,7 @@ mimic_beg = """
 |                  |_|  |_| |_____| |_|  |_| |_____|  \_____|                  |
 |______________________________________________________________________________|
 |                                                                              |
-|         Model unIversal constrained cosMological Initial Conditions          |
+|                          MIMetic Initial Conditions                          |
 |______________________________________________________________________________|
 
 """
@@ -46,13 +48,7 @@ class MIMIC:
         self.FFT_Ngrid = None
         self.ERROR = False
 
-        # To run with or without MPI (doesn't work at the moment!)
-        if self.MPI is not None:
-            self.rank = self.MPI.rank
-            self.nompi = False
-        else:
-            self.rank = 0
-            self.nompi = True
+        self.rank = self.MPI.rank
 
         # Time Variables
         self.time = {
@@ -62,10 +58,6 @@ class MIMIC:
             "Prep_End": None,
             "WF_Start": None,
             "WF_End": None,
-            "WF_Sub_Start": None,
-            "WF_Sub_End": None,
-            "WF_Cons_Start": None,
-            "WF_Cons_End": None,
             "RZA_Start": None,
             "RZA_End": None,
             "CR_Prep_Start": None,
@@ -101,15 +93,14 @@ class MIMIC:
             "dens_Sigma_NL": 0.,
             "psi_Sigma_NL": 0.,
             "vel_Sigma_NL": 0.,
-            "klims": True
+            "klims": True,
+            "gridcorr": True,
+            "Ngrid_Large": None
         }
         self.WF = {
             "Field": None,
             "Mode": None,
             "Convert": None,
-            "CalcVar": None,
-            "SubBoxsize": None,
-            "SubNgrid": None
         }
         self.RZA = {
             "Method": None
@@ -127,11 +118,7 @@ class MIMIC:
         # Need to think about this
         self.what2run = {
             "WF": None,
-            "WF_Var": None,
-            "WF_SubBox": None,
-            "WF_SubVar": None,
             "WF_Cons": None,
-            "WF_ConsVar": None,
             "RZA": None,
             "CR": None,
             "IC": None
@@ -198,11 +185,18 @@ class MIMIC:
         self.interp_psiT_pu = None
         self.interp_psiR_uu = None
         self.interp_psiT_uu = None
+        self.xi_box = None
+        self.zeta_p_box = None
+        self.zeta_u_box = None
+        self.psixx_pp_box = None
+        self.psixy_pp_box = None
+        self.psixx_pu_box = None
+        self.psixy_pu_box = None
+        self.psixx_uu_box = None
+        self.psixy_uu_box = None
         # Covariance related data
         self.cov = None
-        self.inv = None
         self.cov_CR = None
-        self.inv_CR = None
         self.eta = None
         self.eta_CR = None
         # store
@@ -233,10 +227,7 @@ class MIMIC:
 
     def _print_zero(self, *value):
         """Print at rank=0."""
-        if self.nompi is None:
-            print(*value, flush=True)
-        else:
-            self.MPI.mpi_print_zero(*value)
+        self.MPI.mpi_print_zero(*value)
 
     def _break4error(self):
         """Forces MIMIC to break if an error is detected."""
@@ -278,10 +269,9 @@ class MIMIC:
         self._print_zero(" Parameters")
         self._print_zero(" ==========")
 
-        if self.nompi is False:
-            self._print_zero()
-            self._print_zero(" MPI:")
-            self._print_zero(" -", self.MPI.size, "Processors")
+        self._print_zero()
+        self._print_zero(" MPI:")
+        self._print_zero(" -", self.MPI.size, "Processors")
 
         # Read in Cosmological parameters
         self._print_zero()
@@ -435,6 +425,15 @@ class MIMIC:
                     self.constraints["klims"] = bool(params["Constraints"]["klims"])
                     self._print_zero(" - klims              =", io.bool2yesno(self.constraints["klims"]))
 
+            if self._check_param_key(params["Constraints"], "gridcorr"):
+                if params["Constraints"]["gridcorr"] != "None":
+                    self.constraints["gridcorr"] = bool(params["Constraints"]["gridcorr"])
+                    self._print_zero(" - gridcorr           =", io.bool2yesno(self.constraints["gridcorr"]))
+
+            if self._check_param_key(params["Constraints"], "Ngrid_Large"):
+                if params["Constraints"]["Ngrid_Large"] != "None":
+                    self.constraints["Ngrid_Large"] = int(params["Constraints"]["Ngrid_Large"])
+                    self._print_zero(" - Ngrid_Large        =", self.constraints["Ngrid_Large"])
 
         if self._check_param_key(params, "WF"):
 
@@ -443,8 +442,7 @@ class MIMIC:
 
             self.WF["Field"] = params["WF"]["Field"]
 
-            check = io.inlist(self.WF["Field"], ["dens", "psi_x", "psi_y", "psi_z", "psi_r",
-                "vel_x", "vel_y", "vel_z", "vel_r"])
+            check = io.inlist(self.WF["Field"], ["dens", "psi_x", "psi_y", "psi_z", "psi_r", "vel_x", "vel_y", "vel_z", "vel_r"])
 
             self.ERROR = io._error_if_false(check)
             io._error_message(self.ERROR, "Field string is unsupported, current %s but must be either 'dens', 'psi_x', 'psi_y', 'psi_z', 'vel_x', 'vel_y' and 'vel_z'.")
@@ -463,17 +461,6 @@ class MIMIC:
 
                 self.what2run["WF"] = True
 
-                if self._check_param_key(params["WF"], "CalcVar"):
-                    if params["WF"]["CalcVar"] != "None":
-                        self.WF["CalcVar"] = bool(params["WF"]["CalcVar"])
-                        self._print_zero(" - CalcVar            =", io.bool2yesno(self.WF["CalcVar"]))
-                    else:
-                        self.WF["CalcVar"] = False
-                else:
-                    self.WF["CalcVar"] = False
-
-                self.what2run["WF_Var"] = self.WF["CalcVar"]
-
                 if self._check_param_key(params["WF"], "Convert"):
                     if params["WF"]["Convert"] != "None":
                         if self.WF["Field"] == "dens":
@@ -487,56 +474,6 @@ class MIMIC:
                             self.ERROR = True
                             io._error_message(self.ERROR, "WF convert only supported for Field='dens'.", MPI=self.MPI)
                     self._break4error()
-
-            elif self.WF["Mode"] == "Sub":
-
-                if self._check_param_key(params["WF"], "SubBoxsize"):
-                    if params["WF"]["SubBoxsize"] != "None":
-                        self.WF["SubBoxsize"] = float(params["WF"]["SubBoxsize"])
-                        self._print_zero(" - SubBoxsize         =", self.WF["SubBoxsize"])
-                    else:
-                        self.ERROR = True
-                else:
-                    self.ERROR = True
-                io._error_message(self.ERROR, "SubBoxsize must be defined.", MPI=self.MPI)
-                self._break4error()
-
-                if self._check_param_key(params["WF"], "SubNgrid"):
-                    if params["WF"]["SubNgrid"] != "None":
-                        self.WF["SubNgrid"] = int(params["WF"]["SubNgrid"])
-                        self._print_zero(" - SubNgrid           =", self.WF["SubNgrid"])
-                    else:
-                        self.ERROR = True
-                else:
-                    self.ERROR = True
-                io._error_message(self.ERROR, "SubNgrid must be defined.", MPI=self.MPI)
-                self._break4error()
-
-                if self._check_param_key(params["WF"], "CalcVar"):
-                    if params["WF"]["CalcVar"] != "None":
-                        self.WF["CalcVar"] = bool(params["WF"]["CalcVar"])
-                        self._print_zero(" - CalcVar            =", io.bool2yesno(self.WF["CalcVar"]))
-                    else:
-                        self.WF["CalcVar"] = False
-                else:
-                    self.WF["CalcVar"] = False
-
-                self.what2run["WF_SubBox"] = True
-                self.what2run["WF_SubVar"] = self.WF["CalcVar"]
-
-            elif self.WF["Mode"] == "Cons":
-
-                if self._check_param_key(params["WF"], "CalcVar"):
-                    if params["WF"]["CalcVar"] != "None":
-                        self.WF["CalcVar"] = bool(params["WF"]["CalcVar"])
-                        self._print_zero(" - CalcVar            =", io.bool2yesno(self.WF["CalcVar"]))
-                    else:
-                        self.WF["CalcVar"] = False
-                else:
-                    self.WF["CalcVar"] = False
-
-                self.what2run["WF_Cons"] = True
-                self.what2run["WF_ConsVar"] = self.WF["CalcVar"]
 
         if self._check_param_key(params, "RZA"):
 
@@ -835,80 +772,43 @@ class MIMIC:
         """Save correlation functions."""
         if self.rank == 0:
             fname_prefix = self._get_fname_prefix()
-            fname = fname_prefix + "correlator.npz"
-            self._print_zero(" - Save correlation function as :", fname)
-            io.save_correlators(fname, self.corr_redshift, self.corr_r, self.corr_xi,
+            fname = fname_prefix + "analytic_correlator.npz"
+            self._print_zero(" - Save analytic correlation function as :", fname)
+            io.save_analytic_correlators(fname, self.corr_redshift, self.corr_r, self.corr_xi,
                 self.corr_zeta_p, self.corr_zeta_u, self.corr_psiR_pp, self.corr_psiT_pp,
                 self.corr_psiR_pu, self.corr_psiT_pu, self.corr_psiR_uu, self.corr_psiT_uu,
                 filetype='npz')
+            fname = fname_prefix + "grid_correlator.npz"
+            self._print_zero(" - Save grid correlation function as :", fname)
+            io.save_grid_correlators(fname, self.corr_redshift, self.xi_box,
+                self.zeta_p_box, self.zeta_u_box, self.psixx_pp_box, self.psixy_pp_box,
+                self.psixx_pu_box, self.psixy_pu_box, self.psixx_uu_box, self.psixy_uu_box, self.stretch_grid,
+                filetype='npz')
 
 
-    def _load_correlators(self):
-        """Load correlation functions."""
-        if self.constraints["CorrFile"] is not None:
-            self._print_zero(" - loading correlator file %s" % self.constraints["CorrFile"])
-            if self.rank == 0:
-                fname = self.constraints["CorrFile"]
-                redshift, r, xi, zeta_p, zeta_u, psiR_pp, psiT_pp, psiR_pu, psiT_pu, psiR_uu, psiT_uu = io.load_correlators(fname)
-            else:
-                redshift = None
-                r, xi, zeta_p, zeta_u = None, None, None, None
-                psiR_pp, psiT_pp, psiR_pu, psiT_pu, psiR_uu, psiT_uu = None, None, None, None, None, None
-            redshift = self.MPI.broadcast(redshift)
-            if self.corr_redshift == redshift:
-                self._print_zero(" - Correlation redshift %0.2f matches desired redshift %0.2f, storing correlators for use." % (redshift, self.corr_redshift))
-                self.corr_r = self.MPI.broadcast(r)
-                self.corr_xi = self.MPI.broadcast(xi)
-                self.corr_zeta_p = self.MPI.broadcast(zeta_p)
-                self.corr_zeta_u = self.MPI.broadcast(zeta_u)
-                self.corr_psiR_pp = self.MPI.broadcast(psiR_pp)
-                self.corr_psiT_pp = self.MPI.broadcast(psiT_pp)
-                self.corr_psiR_pu = self.MPI.broadcast(psiR_pu)
-                self.corr_psiT_pu = self.MPI.broadcast(psiT_pu)
-                self.corr_psiR_uu = self.MPI.broadcast(psiR_uu)
-                self.corr_psiT_uu = self.MPI.broadcast(psiT_uu)
-                return True
-            else:
-                self._print_zero(" - Correlation redshift %0.2f does not matches desired redshift %0.2f, need to compute them." % (redshift, self.corr_redshift))
-                return False
-        else:
-            return False
+    def _calc_analytic_correlators(self):
+        """Calculate analytic correlation functions."""
 
-
-    def _calc_correlators(self):
-        """Calculate correlation functions."""
-        self._print_zero(" - Compute correlators in parallel")
+        self._print_zero(" - Computing analytic correlators in parallel")
 
         if self.constraints["klims"]:
+
             self.sim_kmin = None
             self.sim_kmax = None
 
-            kn = shift.cart.get_kf(self.siminfo["Boxsize"])
-            kf = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
-
-            # if self.what2run["WF"] or self.what2run["WF_Cons"] or self.what2run["CR"] or self.what2run["IC"]:
-            #     #self.sim_kmin = shift.cart.get_kf(self.siminfo["Boxsize"])
-            #     #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
-            #     kf = shift.cart.get_kf(self.siminfo["Boxsize"])
-            #     kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
-            #
-            # elif self.what2run["WF_SubBox"]:
-            #     #self.sim_kmin = shift.cart.get_kf(self.WF["SubBoxsize"])
-            #     #self.sim_kmax = np.sqrt(3.)*shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
-            #     kf = shift.cart.get_kf(self.siminfo["Boxsize"])
-            #     kn = shift.cart.get_kn(self.WF["SubBoxsize"], self.WF["SubNgrid"])
+            kf = shift.cart.get_kf(self.siminfo["Boxsize"])
+            kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
 
             smallfilter = field.get_lowres_filter(self.theory_kh, kn, k0=None, T=0.1)
             largefilter = field.get_highres_filter(self.theory_kh, kf, k0=None, T=0.1)
-            self.theory_pk *= smallfilter*largefilter
 
         else:
             self.sim_kmin = None
             self.sim_kmax = None
+            smallfilter = 1.
+            largefilter = 1.
 
-        self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 100)
-
-        dx = self.siminfo["Boxsize"]/self.siminfo["Ngrid"]
+        self.corr_r = np.logspace(-2, np.log10(np.sqrt(3.)*self.siminfo["Boxsize"]), 1000)
 
         Dz2 = self._get_growth_D(self.corr_redshift, kmag=self.theory_kh)**2.
         fz0 = self._get_growth_f(self.corr_redshift, kmag=self.theory_kh)
@@ -918,37 +818,57 @@ class MIMIC:
 
         self._print_zero(" -- Computing xi(r)")
 
-        _xi = theory.pk2xi(_corr_r, self.theory_kh, Dz2*self.theory_pk, kmin=self.sim_kmin,
-            kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+        _xi = theory.pk2xi(
+            _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+            kmin=self.sim_kmin, kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), 
+            kbinsmax=int(1e6), Rg=_Rg
+        )
 
         self._print_zero(" -- Computing zeta^p(r)")
 
-        _zeta_p = theory.pk2zeta(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=None,
-            kmin=self.sim_kmin, kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4),
-            kbinsmax=int(1e6), Rg=_Rg)
+        _zeta_p = theory.pk2zeta(
+            _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+            fk=None, kmin=self.sim_kmin, kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4),
+            kbinsmax=int(1e6), Rg=_Rg
+        )
 
         self._print_zero(" -- Computing zeta^u(r)")
 
         if self.cosmo["ScaleDepGrowth"]:
-            _zeta_u = theory.pk2zeta(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
-                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+            _zeta_u = theory.pk2zeta(
+                _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+                fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax, kfactor=100, kbinsmin=int(1e4), 
+                kbinsmax=int(1e6), Rg=_Rg
+            )
         else:
             _zeta_u = fz0*np.copy(_zeta_p)
 
         self._print_zero(" -- Computing psiR^pp(r) and psiT^pp(r)")
 
-        _psiR_pp = theory.pk2psiR(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=None, kmin=self.sim_kmin, kmax=self.sim_kmax,
-            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
-        _psiT_pp = theory.pk2psiT(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=None, kmin=self.sim_kmin, kmax=self.sim_kmax,
-            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+        _psiR_pp = theory.pk2psiR(
+            _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+            fk=None, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+        )
+        _psiT_pp = theory.pk2psiT(
+            _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+            fk=None, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+        )
 
         self._print_zero(" -- Computing psiR^pu(r) and psiT^pu(r)")
 
         if self.cosmo["ScaleDepGrowth"]:
-            _psiR_pu = theory.pk2psiR(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=np.sqrt(fz0), kmin=self.sim_kmin, kmax=self.sim_kmax,
-                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
-            _psiT_pu = theory.pk2psiT(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=np.sqrt(fz0), kmin=self.sim_kmin, kmax=self.sim_kmax,
-                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+            _psiR_pu = theory.pk2psiR(
+                _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+                fk=np.sqrt(fz0), kmin=self.sim_kmin, kmax=self.sim_kmax,
+                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+            )
+            _psiT_pu = theory.pk2psiT(
+                _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+                fk=np.sqrt(fz0), kmin=self.sim_kmin, kmax=self.sim_kmax,
+                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+            )
         else:
             _psiR_pu = fz0*np.copy(_psiR_pp)
             _psiT_pu = fz0*np.copy(_psiT_pp)
@@ -956,18 +876,30 @@ class MIMIC:
         self._print_zero(" -- Computing psiR^uu(r) and psiT^uu(r)")
 
         if self.cosmo["ScaleDepGrowth"]:
-            _psiR_uu = theory.pk2psiR(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
-                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
-            _psiT_uu = theory.pk2psiT(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
-                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+            _psiR_uu = theory.pk2psiR(
+                _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+                fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+                )
+            _psiT_uu = theory.pk2psiT(
+                _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+                fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+                kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+            )
         else:
             _psiR_uu = (fz0**2)*np.copy(_psiR_pp)
             _psiT_uu = (fz0**2)*np.copy(_psiT_pp)
 
-        _psiR_uu = theory.pk2psiR(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
-            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
-        _psiT_uu = theory.pk2psiT(_corr_r, self.theory_kh, Dz2*self.theory_pk, fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
-            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg)
+        _psiR_uu = theory.pk2psiR(
+            _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+            fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+        )
+        _psiT_uu = theory.pk2psiT(
+            _corr_r, self.theory_kh, Dz2*self.theory_pk*smallfilter*largefilter, 
+            fk=fz0, kmin=self.sim_kmin, kmax=self.sim_kmax,
+            kfactor=100, kbinsmin=int(1e4), kbinsmax=int(1e6), Rg=_Rg
+        )
 
         self.MPI.wait()
 
@@ -1009,20 +941,6 @@ class MIMIC:
         self.corr_psiR_uu = np.concatenate([np.array([_psiR_uu[0]]), _psiR_uu])
         self.corr_psiT_uu = np.concatenate([np.array([_psiT_uu[0]]), _psiT_uu])
 
-
-    def _prep_correlators(self, redshift):
-        """Constructing correlation interpolation functions."""
-        self._print_zero()
-        self._print_zero(" Correlators")
-        self._print_zero(" ===========")
-        self._print_zero()
-
-        self.corr_redshift = redshift
-
-        if self._load_correlators() == False:
-            self._calc_correlators()
-            self._save_correlators()
-
         self._print_zero(" - Construct interpolators")
 
         self.interp_xi = interp1d(self.corr_r, self.corr_xi, kind='cubic', bounds_error=False, fill_value=0.)
@@ -1034,6 +952,270 @@ class MIMIC:
         self.interp_psiT_pu = interp1d(self.corr_r, self.corr_psiT_pu, kind='cubic', bounds_error=False, fill_value=0.)
         self.interp_psiR_uu = interp1d(self.corr_r, self.corr_psiR_uu, kind='cubic', bounds_error=False, fill_value=0.)
         self.interp_psiT_uu = interp1d(self.corr_r, self.corr_psiT_uu, kind='cubic', bounds_error=False, fill_value=0.)
+    
+
+    def _calc_grid_correlators(self):
+        """
+        Calculate grid correlation functions.
+        """
+
+        self._print_zero(" - Compute grid correlators at each rank")
+        self._print_zero(" -- Compute p(k) interpolator")
+        
+        kn = shift.cart.get_kn(self.siminfo["Boxsize"], self.siminfo["Ngrid"])
+
+        smallfilter = 1.#field.get_lowres_filter(self.theory_kh, kn, k0=None, T=0.1)
+
+        Dz2 = self._get_growth_D(self.corr_redshift, kmag=self.theory_kh)**2.
+        fz0 = self._get_growth_f(self.corr_redshift, kmag=self.theory_kh)
+
+        pk_interp = interp1d(
+            self.theory_kh, Dz2*self.theory_pk*smallfilter, kind='cubic', 
+            bounds_error=False, fill_value=0.
+        )
+
+        if io.isscalar(fz0) == False:
+            fz_interp = interp1d(
+                self.theory_kh, fz0, kind='cubic', bounds_error=False, fill_value=0.
+            )
+            fk3d = fz_interp(kmag)
+        else:
+            fk3d = fz0
+
+        self._print_zero(" -- Compute p(k) grid")
+
+        self.get_kgrid3D()
+        kmag = np.sqrt(self.kx3D**2. + self.ky3D**2. + self.kz3D**2.)
+
+        pk3d = pk_interp(kmag)*(np.ones_like(kmag) + 0j*np.ones_like(kmag))
+        # to get the correct normalisation (1/(2*pi)^3) for the FFT convention used in shift.cart.ifft3D
+        pk3d /= (np.sqrt(2*np.pi))**3
+        
+        # dx = self.siminfo["Boxsize"] / self.siminfo["Ngrid"]
+
+        # pk3d = pk_interp(kmag).astype(np.complex128)
+        # pk3d *= 1.0 / dx**3
+
+        cond = np.where(kmag != 0.)
+
+        self._print_zero(" -- Compute xi grid")
+
+        self.xi_box = shift.cart.mpi_ifft3D(pk3d, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        self._print_zero(" -- Compute zeta gridr")
+
+        zetak = np.copy(pk3d)
+        zetak[cond] *= -1j*self.kx3D[cond]/(kmag[cond]**2.)
+        self.zeta_p_box = shift.cart.mpi_ifft3D(zetak, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        zetak = np.copy(fk3d*pk3d)
+        zetak[cond] *= -1j*self.kx3D[cond]/(kmag[cond]**2.)
+        self.zeta_u_box = shift.cart.mpi_ifft3D(zetak, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        self._print_zero(" -- Compute Psi_xx grid")
+
+        psixxk = np.copy(pk3d)
+        psixxk[cond] *= -1j*(self.kx3D[cond]**2.)/(kmag[cond]**4.)
+        self.psixx_pp_box = shift.cart.mpi_ifft3D(psixxk, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        psixxk = np.copy(pk3d*fk3d)
+        psixxk[cond] *= -1j*(self.kx3D[cond]**2.)/(kmag[cond]**4.)
+        self.psixx_pu_box = shift.cart.mpi_ifft3D(psixxk, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        psixxk = np.copy(pk3d*fk3d*fk3d)
+        psixxk[cond] *= -1j*(self.kx3D[cond]**2.)/(kmag[cond]**4.)
+        self.psixx_uu_box = shift.cart.mpi_ifft3D(psixxk, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        self._print_zero(" -- Compute Psi_xy grid")
+
+        psixyk = np.copy(pk3d)
+        psixyk[cond] *= -1j*(self.kx3D[cond]*self.ky3D[cond])/(kmag[cond]**4.)
+        self.psixy_pp_box = shift.cart.mpi_ifft3D(psixyk, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        psixyk = np.copy(pk3d*fk3d)
+        psixyk[cond] *= -1j*(self.kx3D[cond]*self.ky3D[cond])/(kmag[cond]**4.)
+        self.psixy_pu_box = shift.cart.mpi_ifft3D(psixyk, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        psixyk = np.copy(pk3d*fk3d*fk3d)
+        psixyk[cond] *= -1j*(self.kx3D[cond]*self.ky3D[cond])/(kmag[cond]**4.)
+        self.psixy_uu_box = shift.cart.mpi_ifft3D(psixyk, self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+        if self.constraints["Ngrid_Large"] is not None:
+
+            self._print_zero(" -- Interpolate grid onto stretched sin grid")
+
+            xcos, ycos, zcos = shift.cart.grid3D(1., self.constraints["Ngrid_Large"])
+
+            _, xcosgrid = shift.cart.grid1D(1., self.constraints["Ngrid_Large"])
+
+            xstretchgrid = theory.stretch_sin_backward(xcosgrid, self.siminfo["Boxsize"])
+
+            xstretch = theory.stretch_sin_backward(xcos, self.siminfo["Boxsize"])
+            ystretch = theory.stretch_sin_backward(ycos, self.siminfo["Boxsize"])
+            zstretch = theory.stretch_sin_backward(zcos, self.siminfo["Boxsize"])
+            
+            xedges, _ = shift.cart.mpi_grid1D(self.siminfo["Boxsize"], self.siminfo["Ngrid"], self.MPI)
+
+            dx = xedges[1]-xedges[0]
+            xmin = xedges[0]
+            xmax = xedges[-1]
+
+            cond = np.where((xstretchgrid >= xmin) & (xstretchgrid <= xmax))[0]
+
+            xstretch = xstretch[cond]
+            ystretch = ystretch[cond]
+            zstretch = zstretch[cond]
+
+            xsshape = np.shape(xstretch)
+            
+            xstretch = xstretch.flatten()
+            ystretch = ystretch.flatten()
+            zstretch = zstretch.flatten()
+
+            xmin -= dx
+            xmax += dx
+
+            self.xi_box_up = self.MPI.send_up(self.xi_box[-1]) 
+            self.xi_box_down = self.MPI.send_down(self.xi_box[0])
+            self.xi_box = np.concatenate([np.array([self.xi_box_up]), self.xi_box, np.array([self.xi_box_down])], axis=0) 
+
+            self.zeta_u_box_up = self.MPI.send_up(self.zeta_u_box[-1]) 
+            self.zeta_u_box_down = self.MPI.send_down(self.zeta_u_box[0])
+            self.zeta_u_box = np.concatenate([np.array([self.zeta_u_box_up]), self.zeta_u_box, np.array([self.zeta_u_box_down])], axis=0) 
+
+            self.zeta_p_box_up = self.MPI.send_up(self.zeta_p_box[-1]) 
+            self.zeta_p_box_down = self.MPI.send_down(self.zeta_p_box[0])
+            self.zeta_p_box = np.concatenate([np.array([self.zeta_p_box_up]), self.zeta_p_box, np.array([self.zeta_p_box_down])], axis=0) 
+
+            self.psixx_pp_box_up = self.MPI.send_up(self.psixx_pp_box[-1])
+            self.psixx_pp_box_down = self.MPI.send_down(self.psixx_pp_box[0])
+            self.psixx_pp_box = np.concatenate([np.array([self.psixx_pp_box_up]), self.psixx_pp_box, np.array([self.psixx_pp_box_down])], axis=0)
+
+            self.psixy_pp_box_up = self.MPI.send_up(self.psixy_pp_box[-1])
+            self.psixy_pp_box_down = self.MPI.send_down(self.psixy_pp_box[0])
+            self.psixy_pp_box = np.concatenate([np.array([self.psixy_pp_box_up]), self.psixy_pp_box, np.array([self.psixy_pp_box_down])], axis=0)
+
+            self.psixx_pu_box_up = self.MPI.send_up(self.psixx_pu_box[-1])
+            self.psixx_pu_box_down = self.MPI.send_down(self.psixx_pu_box[0])
+            self.psixx_pu_box = np.concatenate([np.array([self.psixx_pu_box_up]), self.psixx_pu_box, np.array([self.psixx_pu_box_down])], axis=0)
+
+            self.psixy_pu_box_up = self.MPI.send_up(self.psixy_pu_box[-1])
+            self.psixy_pu_box_down = self.MPI.send_down(self.psixy_pu_box[0])
+            self.psixy_pu_box = np.concatenate([np.array([self.psixy_pu_box_up]), self.psixy_pu_box, np.array([self.psixy_pu_box_down])], axis=0)
+
+            self.psixx_uu_box_up = self.MPI.send_up(self.psixx_uu_box[-1])
+            self.psixx_uu_box_down = self.MPI.send_down(self.psixx_uu_box[0])
+            self.psixx_uu_box = np.concatenate([np.array([self.psixx_uu_box_up]), self.psixx_uu_box, np.array([self.psixx_uu_box_down])], axis=0)
+
+            self.psixy_uu_box_up = self.MPI.send_up(self.psixy_uu_box[-1])
+            self.psixy_uu_box_down = self.MPI.send_down(self.psixy_uu_box[0])
+            self.psixy_uu_box = np.concatenate([np.array([self.psixy_uu_box_up]), self.psixy_uu_box, np.array([self.psixy_uu_box_down])], axis=0)
+
+            self.xi_box = fiesta.interp.trilinear(
+                self.xi_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.zeta_p_box = fiesta.interp.trilinear(
+                self.zeta_p_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.zeta_u_box = fiesta.interp.trilinear(
+                self.zeta_u_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.psixx_pp_box = fiesta.interp.trilinear(
+                self.psixx_pp_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.psixy_pp_box = fiesta.interp.trilinear(
+                self.psixy_pp_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, fill_value=np.nan, periodic=[False, True, True]
+            )
+            self.psixx_pu_box = fiesta.interp.trilinear(
+                self.psixx_pu_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, 
+                fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.psixy_pu_box = fiesta.interp.trilinear(
+                self.psixy_pu_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, 
+                fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.psixx_uu_box = fiesta.interp.trilinear(
+                self.psixx_uu_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, 
+                fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.psixy_uu_box = fiesta.interp.trilinear(
+                self.psixy_uu_box, [xmax-xmin, self.siminfo["Boxsize"], self.siminfo["Boxsize"]],
+                xstretch-xmin, ystretch, zstretch, 
+                fill_value=np.nan, periodic=[False, True, True]
+            )
+
+            self.xi_box = self.xi_box.reshape(xsshape)
+            self.zeta_p_box = self.zeta_p_box.reshape(xsshape)
+            self.zeta_u_box = self.zeta_u_box.reshape(xsshape)
+            self.psixx_pp_box = self.psixx_pp_box.reshape(xsshape)
+            self.psixy_pp_box = self.psixy_pp_box.reshape(xsshape)
+            self.psixx_pu_box = self.psixx_pu_box.reshape(xsshape)
+            self.psixy_pu_box = self.psixy_pu_box.reshape(xsshape)
+            self.psixx_uu_box = self.psixx_uu_box.reshape(xsshape)
+            self.psixy_uu_box = self.psixy_uu_box.reshape(xsshape)
+
+            self.stretch_grid = True
+        else:
+            self.stretch_grid = False
+        
+        self._print_zero(" -- Collect and broadcast full grid correlator boxes")
+
+        self.xi_box = self.MPI.collect(self.xi_box)
+        self.zeta_p_box = self.MPI.collect(self.zeta_p_box)
+        self.zeta_u_box = self.MPI.collect(self.zeta_u_box)
+
+        self.psixx_pp_box = self.MPI.collect(self.psixx_pp_box)
+        self.psixy_pp_box = self.MPI.collect(self.psixy_pp_box)
+
+        self.psixx_pu_box = self.MPI.collect(self.psixx_pu_box)
+        self.psixy_pu_box = self.MPI.collect(self.psixy_pu_box)
+
+        self.psixx_uu_box = self.MPI.collect(self.psixx_uu_box)
+        self.psixy_uu_box = self.MPI.collect(self.psixy_uu_box)
+
+        self.xi_box = self.MPI.broadcast(self.xi_box)
+        self.zeta_p_box = self.MPI.broadcast(self.zeta_p_box)
+        self.zeta_u_box = self.MPI.broadcast(self.zeta_u_box)
+
+        self.psixx_pp_box = self.MPI.broadcast(self.psixx_pp_box)
+        self.psixy_pp_box = self.MPI.broadcast(self.psixy_pp_box)
+
+        self.psixx_pu_box = self.MPI.broadcast(self.psixx_pu_box)
+        self.psixy_pu_box = self.MPI.broadcast(self.psixy_pu_box)
+
+        self.psixx_uu_box = self.MPI.broadcast(self.psixx_uu_box)
+        self.psixy_uu_box = self.MPI.broadcast(self.psixy_uu_box)
+
+
+    def _prep_correlators(self, redshift):
+        """Constructing correlation interpolation functions."""
+        self._print_zero()
+        self._print_zero(" Correlators")
+        self._print_zero(" ===========")
+        self._print_zero()
+
+        self.corr_redshift = redshift
+
+        self._calc_analytic_correlators()
+        self._print_zero()
+        self._calc_grid_correlators()
+        self._print_zero()
+        self._save_correlators()
 
 
     # This might need some rethinking, naming wise rather than pipeline.
@@ -1045,6 +1227,1057 @@ class MIMIC:
         self._prep_correlators(self.constraints["z_eff"])
 
 
+    # Distributed matrix solve helper functions ---------------------------
+
+    def _add_diag_to_local_rows(self, A_local, row_ind, diag):
+        """Add a full diagonal vector to a row-distributed matrix.
+
+        A_local contains only this rank's rows, but all columns.
+        row_ind gives the global row index for each local row.
+        diag is the full global diagonal vector.
+        """
+        row_ind = np.asarray(row_ind, dtype=np.int64)
+        diag = np.asarray(diag, dtype=np.float64)
+
+        for iloc, iglob in enumerate(row_ind):
+            A_local[iloc, iglob] += diag[iglob]
+
+
+    def _add_scalar_to_local_diagonal(self, A_local, row_ind, lam):
+        """Add lam * I to a row-distributed matrix."""
+        row_ind = np.asarray(row_ind, dtype=np.int64)
+
+        for iloc, iglob in enumerate(row_ind):
+            A_local[iloc, iglob] += lam
+
+
+    def _matvec_rowdist(self, A_local, x):
+        """Distributed matrix-vector product y = A x.
+
+        Parameters
+        ----------
+        A_local : ndarray
+            Local row slab of the matrix, with shape (n_local_rows, n_total).
+        x : ndarray
+            Full input vector, replicated on all ranks.
+
+        Returns
+        -------
+        y : ndarray
+            Full output vector, replicated on all ranks.
+
+        Notes
+        -----
+        The matrix remains distributed. Only vectors are replicated.
+        """
+        x = np.asarray(x, dtype=np.float64)
+
+        # Each rank computes its owned rows.
+        y_local = A_local.dot(x)
+
+        y = self.MPI.collect(y_local)
+        y = self.MPI.broadcast(y)
+
+        return np.asarray(y, dtype=np.float64)
+
+
+    def _solve_eta_rowdist_gmres(
+        self,
+        A_local,
+        b,
+        tol=1e-8,
+        atol=0.0,
+        restart=50,
+        maxiter=500,
+    ):
+        """Solve A eta = b using GMRES with row-distributed A.
+
+        This replaces eta = inv(A) @ b without forming the inverse and without
+        requiring Cholesky/positive-definiteness.
+
+        Parameters
+        ----------
+        A_local : ndarray
+            Local row slab of the covariance matrix, shape (n_local_rows, n_total).
+        b : ndarray
+            Full right-hand-side vector, replicated on all ranks.
+        tol : float
+            Relative convergence tolerance.
+        atol : float
+            Absolute convergence tolerance.
+        restart : int
+            GMRES restart length.
+        maxiter : int
+            Maximum number of GMRES restart cycles in scipy's implementation.
+
+        Returns
+        -------
+        eta : ndarray
+            Full eta vector, replicated on all ranks.
+        """
+        b = np.asarray(b, dtype=np.float64)
+        n = len(b)
+
+        def matvec(x):
+            return self._matvec_rowdist(A_local, x)
+
+        Aop = LinearOperator(
+            shape=(n, n),
+            matvec=matvec,
+            dtype=np.float64,
+        )
+
+        self._print_zero(" - Starting distributed GMRES")
+        self._print_zero(" -- restart =", restart)
+        self._print_zero(" -- maxiter =", maxiter)
+        self._print_zero(" -- tol     =", tol)
+
+        residual_history = []
+
+        def callback(residual):
+            # With callback_type='pr_norm', scipy passes the preconditioned residual norm.
+            residual_history.append(float(residual))
+            if self.rank == 0:
+                print(
+                    " --- GMRES iter %i residual %.6e"
+                    % (len(residual_history), residual_history[-1]),
+                    flush=True,
+                )
+
+        # SciPy changed gmres keyword names across versions.
+        # Newer scipy uses rtol; older scipy uses tol.
+        try:
+            eta, info = gmres(
+                Aop,
+                b,
+                rtol=tol,
+                atol=atol,
+                restart=restart,
+                maxiter=maxiter,
+                callback=callback,
+                callback_type="pr_norm",
+            )
+        except TypeError:
+            eta, info = gmres(
+                Aop,
+                b,
+                tol=tol,
+                atol=atol,
+                restart=restart,
+                maxiter=maxiter,
+                callback=callback,
+            )
+
+        # Explicit final residual check.
+        res = b - self._matvec_rowdist(A_local, eta)
+
+        bnorm = np.linalg.norm(b)
+        if bnorm == 0.0:
+            relres = np.linalg.norm(res)
+        else:
+            relres = np.linalg.norm(res) / bnorm
+
+        self._print_zero(" - GMRES info =", info)
+        self._print_zero(" - GMRES final relative residual =", relres)
+
+        if info != 0:
+            raise np.linalg.LinAlgError(
+                "Distributed GMRES did not converge. info=%s, final relres=%.6e"
+                % (str(info), relres)
+            )
+
+        return np.asarray(eta, dtype=np.float64)
+    
+    def _extract_type_subcov_local(self, type_id):
+        """Extract a type-type covariance block from the row-distributed covariance.
+
+        Returns
+        -------
+        cond : ndarray
+            Global indices of constraints of this type.
+        row_pos : ndarray
+            Row positions in the reduced type-block owned by this rank.
+        A_local : ndarray
+            Local rows of C[cond, cond].
+        """
+        cond = np.where(self.cons_c_type == type_id)[0]
+
+        if len(cond) == 0:
+            return cond, None, None
+
+        local_mask = self.cons_c_type[self.cov_rows] == type_id
+
+        row_global = self.cov_rows[local_mask]
+
+        # Position of these global rows inside the reduced type block.
+        row_pos = np.searchsorted(cond, row_global)
+
+        A_local = self.cov[local_mask][:, cond].copy()
+
+        return cond, row_pos, A_local
+
+
+    def _add_sigma_to_type_subcov_local(self, A_local, row_sub, cond, sigma):
+        """Return A_local + sigma^2 I for a type-specific distributed block."""
+        A = np.asarray(A_local, dtype=np.float64).copy()
+
+        if sigma == 0.0 or len(row_sub) == 0:
+            return A
+
+        sigma2 = sigma * sigma
+
+        # cond is sorted global indices. row_sub is a subset of cond.
+        diag_pos = np.searchsorted(cond, row_sub)
+
+        for iloc, jloc in enumerate(diag_pos):
+            if jloc < len(cond) and cond[jloc] == row_sub[iloc]:
+                A[iloc, jloc] += sigma2
+
+        return A
+
+
+    def _chi2_reduced_type_with_sigma(
+        self,
+        type_id,
+        sigma,
+        tol=1e-8,
+        restart=50,
+        maxiter=500,
+    ):
+        """Compute reduced chi2 for a type block using distributed GMRES.
+
+        This is the inverse-free equivalent of:
+            chi2 = c_type.T @ inv(C_type + sigma^2 I) @ c_type
+        """
+        cond, row_sub, A0_local = self._extract_type_subcov_local(type_id)
+
+        if len(cond) == 0:
+            return np.nan, np.nan, 0
+
+        A_local = self._add_sigma_to_type_subcov_local(
+            A0_local,
+            row_sub,
+            cond,
+            sigma,
+        )
+
+        b = self.cons_c[cond]
+
+        eta_t = self._solve_eta_rowdist_gmres(
+            A_local,
+            b,
+            tol=tol,
+            atol=0.0,
+            restart=restart,
+            maxiter=maxiter,
+        )
+
+        chi2 = float(np.dot(b, eta_t))
+        dof = len(b)
+        red_chi2 = chi2 / float(dof)
+
+        return chi2, red_chi2, dof
+
+
+    def _optimise_sigma_NL_type_gmres(
+        self,
+        type_id,
+        name,
+        max_sigma,
+        target_red_chi2=1.0,
+        etol=0.01,
+        max_iter=30,
+        tol=1e-8,
+        restart=50,
+        maxiter=500,
+    ):
+        """Optimise sigma_NL for one constraint type using inverse-free GMRES.
+
+        Uses bisection on sigma_NL to make reduced chi2 approximately one.
+        """
+        cond = np.where(self.cons_c_type == type_id)[0]
+
+        if len(cond) == 0:
+            self._print_zero(" -- No", name, "constraints found")
+            return 0.0, True
+
+        self._print_zero(" -- Optimising", name, "dispersion with distributed GMRES")
+        self._print_zero(" --- N =", len(cond))
+
+        chi2_lo, red_lo, dof = self._chi2_reduced_type_with_sigma(
+            type_id,
+            0.0,
+            tol=tol,
+            restart=restart,
+            maxiter=maxiter,
+        )
+
+        self._print_zero(
+            " --- sigma = %.6e  chi2/dof = %.6f" % (0.0, red_lo)
+        )
+
+        # If already below or close to one, no extra dispersion is needed.
+        if red_lo <= target_red_chi2 + etol:
+            self._print_zero(
+                " --- No extra %s dispersion needed; chi2/dof already %.6f"
+                % (name, red_lo)
+            )
+            return 0.0, True
+
+        chi2_hi, red_hi, _ = self._chi2_reduced_type_with_sigma(
+            type_id,
+            max_sigma,
+            tol=tol,
+            restart=restart,
+            maxiter=maxiter,
+        )
+
+        self._print_zero(
+            " --- sigma = %.6e  chi2/dof = %.6f" % (max_sigma, red_hi)
+        )
+
+        # If max_sigma is not enough, return max_sigma and flag failure.
+        if red_hi > target_red_chi2:
+            self._print_zero(
+                " --- WARNING: max_sigma = %.6e still gives chi2/dof = %.6f"
+                % (max_sigma, red_hi)
+            )
+            return max_sigma, False
+
+        lo = 0.0
+        hi = float(max_sigma)
+
+        best_sigma = hi
+        best_red = red_hi
+
+        for it in range(max_iter):
+            mid = 0.5 * (lo + hi)
+
+            chi2_mid, red_mid, _ = self._chi2_reduced_type_with_sigma(
+                type_id,
+                mid,
+                tol=tol,
+                restart=restart,
+                maxiter=maxiter,
+            )
+
+            self._print_zero(
+                " --- iter %02i sigma = %.6e  chi2/dof = %.6f"
+                % (it + 1, mid, red_mid)
+            )
+
+            best_sigma = mid
+            best_red = red_mid
+
+            if abs(red_mid - target_red_chi2) <= etol:
+                self._print_zero(
+                    " --- success: %s_Sigma_NL = %.6e gives chi2/dof = %.6f"
+                    % (name, best_sigma, best_red)
+                )
+                return best_sigma, True
+
+            # Increasing sigma increases the covariance diagonal and generally
+            # decreases chi2.
+            if red_mid > target_red_chi2:
+                lo = mid
+            else:
+                hi = mid
+
+        self._print_zero(
+            " --- reached max_iter: %s_Sigma_NL = %.6e gives chi2/dof = %.6f"
+            % (name, best_sigma, best_red)
+        )
+
+        return best_sigma, abs(best_red - target_red_chi2) <= etol
+    
+    def _matvec_shifted_rowdist(self, A_local, x, sigma2=0.0):
+        """Distributed matvec y = (A + sigma2 I) x.
+
+        A_local is row-distributed. x and y are full replicated vectors.
+        """
+        y = self._matvec_rowdist(A_local, x)
+
+        if sigma2 != 0.0:
+            y = y + sigma2 * x
+
+        return y
+    
+    def _matvec_subrowdist(self, A_local, row_pos, n, x):
+        """Distributed matvec for an irregular row-distributed submatrix.
+
+        A_local has local rows of a reduced n x n matrix.
+        row_pos gives where each local row belongs in the reduced vector.
+        """
+        x = np.asarray(x, dtype=np.float64)
+
+        y_local = A_local.dot(x)
+
+        all_rows = self.MPI.collect(row_pos, outlist=True)
+        all_vals = self.MPI.collect(y_local, outlist=True)
+
+        if self.rank == 0:
+            y = np.zeros(n, dtype=np.float64)
+
+            for rows, vals in zip(all_rows, all_vals):
+                y[rows] = vals
+        else:
+            y = None
+
+        y = self.MPI.broadcast(y)
+
+        return np.asarray(y, dtype=np.float64)
+    
+    def _matvec_shifted_subrowdist(self, A_local, row_pos, n, x, sigma2=0.0):
+        """Compute y = (A + sigma2 I) x for an irregular type subblock."""
+        y = self._matvec_subrowdist(A_local, row_pos, n, x)
+
+        if sigma2 != 0.0:
+            y = y + sigma2 * x
+
+        return y
+    
+    def _get_subrowdist_diag(self, A_local, row_pos, n, sigma2=0.0):
+        """Return diagonal of an irregular row-distributed submatrix."""
+        d_local = np.zeros(n, dtype=np.float64)
+
+        for iloc, ipos in enumerate(row_pos):
+            d_local[ipos] = A_local[iloc, ipos] + sigma2
+
+        d = self.MPI.sum(d_local)
+
+        if self.rank != 0:
+            d = None
+
+        d = self.MPI.broadcast(d)
+
+        return np.asarray(d, dtype=np.float64)
+
+    def _solve_shifted_symmetric_subrowdist(
+        self,
+        A_local,
+        row_pos,
+        b,
+        sigma=0.1,
+        tol=1e-5,
+        maxiter=500,
+        x0=None,
+    ):
+        """Solve (A + sigma^2 I)x = b for a symmetric type subblock.
+
+        Uses CG first, then MINRES, then GMRES as fallback.
+        """
+        b = np.asarray(b, dtype=np.float64)
+        n = len(b)
+        sigma2 = float(sigma) * float(sigma)
+
+        def matvec(x):
+            return self._matvec_shifted_subrowdist(
+                A_local,
+                row_pos,
+                n,
+                x,
+                sigma2=sigma2,
+            )
+
+        Aop = LinearOperator(
+            shape=(n, n),
+            matvec=matvec,
+            dtype=np.float64,
+        )
+
+        # Jacobi preconditioner.
+        diag = self._get_subrowdist_diag(
+            A_local,
+            row_pos,
+            n,
+            sigma2=sigma2,
+        )
+
+        scale = np.median(np.abs(diag))
+        if scale <= 0.0 or not np.isfinite(scale):
+            scale = np.max(np.abs(diag))
+        if scale <= 0.0 or not np.isfinite(scale):
+            scale = 1.0
+
+        floor = 1e-12 * scale
+
+        # Positive preconditioner. This is safe for CG/MINRES as a simple SPD M.
+        Minv_diag = 1.0 / (np.abs(diag) + floor)
+
+        Mop = LinearOperator(
+            shape=(n, n),
+            matvec=lambda x: Minv_diag * x,
+            dtype=np.float64,
+        )
+
+        if x0 is not None:
+            x0 = np.asarray(x0, dtype=np.float64)
+
+        # 1. CG attempt.
+        try:
+            x, info = cg(
+                Aop,
+                b,
+                x0=x0,
+                M=Mop,
+                rtol=tol,
+                atol=0.0,
+                maxiter=maxiter,
+            )
+        except TypeError:
+            x, info = cg(
+                Aop,
+                b,
+                x0=x0,
+                M=Mop,
+                tol=tol,
+                atol=0.0,
+                maxiter=maxiter,
+            )
+
+        if info == 0:
+            return x, "cg", info
+
+        self._print_zero(
+            " ---- CG failed/stalled with info =", info, "; trying MINRES"
+        )
+
+        # 2. MINRES fallback.
+        try:
+            x, info = minres(
+                Aop,
+                b,
+                x0=x0,
+                M=Mop,
+                rtol=tol,
+                maxiter=maxiter,
+            )
+        except TypeError:
+            x, info = minres(
+                Aop,
+                b,
+                x0=x0,
+                M=Mop,
+                tol=tol,
+                maxiter=maxiter,
+            )
+
+        if info == 0:
+            return x, "minres", info
+
+        self._print_zero(
+            " ---- MINRES failed/stalled with info =", info, "; trying GMRES"
+        )
+
+        # 3. Robust fallback. Slower, but should avoid optimiser death.
+        try:
+            x, info = gmres(
+                Aop,
+                b,
+                x0=x0,
+                M=Mop,
+                rtol=tol,
+                atol=0.0,
+                restart=50,
+                maxiter=maxiter,
+            )
+        except TypeError:
+            x, info = gmres(
+                Aop,
+                b,
+                x0=x0,
+                M=Mop,
+                tol=tol,
+                atol=0.0,
+                restart=50,
+                maxiter=maxiter,
+            )
+
+        if info == 0:
+            return x, "gmres", info
+
+        raise np.linalg.LinAlgError(
+            "Shifted type-block solve failed: CG/MINRES/GMRES all failed. "
+            "Last info=%s" % str(info)
+        )
+    
+    def _chi2_reduced_type_with_sigma_fast(
+        self,
+        type_id,
+        sigma,
+        tol=1e-5,
+        maxiter=500,
+        x0=None,
+    ):
+        """Compute chi2/dof for one type block without forming an inverse."""
+        cond, row_pos, A_local = self._extract_type_subcov_local(type_id)
+
+        if len(cond) == 0:
+            return np.nan, np.nan, 0, None, "none"
+
+        b = self.cons_c[cond]
+
+        eta_t, method_used, info = self._solve_shifted_symmetric_subrowdist(
+            A_local,
+            row_pos,
+            b,
+            sigma=sigma,
+            tol=tol,
+            maxiter=maxiter,
+            x0=x0,
+        )
+
+        chi2 = float(np.dot(b, eta_t))
+        dof = len(b)
+        red_chi2 = chi2 / float(dof)
+
+        return chi2, red_chi2, dof, eta_t, method_used
+    
+    def _optimise_sigma_NL_type_fast(
+        self,
+        type_id,
+        name,
+        max_sigma,
+        target_red_chi2=1.0,
+        etol=0.03,
+        max_iter=8,
+        solve_tol=1e-4,
+        solve_maxiter=200,
+    ):
+        """Optimise sigma_NL for one constraint type using symmetric solvers.
+
+        Much faster than repeatedly using GMRES.
+        """
+        cond = np.where(self.cons_c_type == type_id)[0]
+
+        if len(cond) == 0:
+            self._print_zero(" -- No", name, "constraints found")
+            return 0.0, True
+
+        self._print_zero(" -- Optimising", name, "dispersion")
+        self._print_zero(" --- N =", len(cond))
+
+        x0 = None
+
+        try:
+            chi2_lo, red_lo, dof, x_lo, method_lo = (
+                self._chi2_reduced_type_with_sigma_fast(
+                    type_id,
+                    sigma=0.0,
+                    tol=solve_tol,
+                    maxiter=solve_maxiter,
+                    x0=None,
+                )
+            )
+        except np.linalg.LinAlgError:
+            self._print_zero(
+                " --- sigma = 0 solve failed; treating chi2/dof as infinity"
+            )
+            red_lo = np.inf
+            x_lo = None
+            method_lo = "failed"
+
+        self._print_zero(
+            " --- sigma = %.6e  chi2/dof = %.6f  solver = %s"
+            % (0.0, red_lo, method_lo)
+        )
+
+        if red_lo <= target_red_chi2 + etol:
+            self._print_zero(
+                " --- no extra %s dispersion needed" % name
+            )
+            return 0.0, True
+
+        x0 = x_lo
+
+        chi2_hi, red_hi, _, x_hi, method_hi = self._chi2_reduced_type_with_sigma_fast(
+            type_id,
+            sigma=max_sigma,
+            tol=solve_tol,
+            maxiter=solve_maxiter,
+            x0=x0,
+        )
+
+        self._print_zero(
+            " --- sigma = %.6e  chi2/dof = %.6f  solver = %s"
+            % (max_sigma, red_hi, method_hi)
+        )
+
+        if red_hi > target_red_chi2:
+            self._print_zero(
+                " --- WARNING: max_sigma = %.6e still gives chi2/dof = %.6f"
+                % (max_sigma, red_hi)
+            )
+            return max_sigma, False
+
+        lo = 0.0
+        hi = float(max_sigma)
+
+        best_sigma = hi
+        best_red = red_hi
+        x0 = x_hi
+
+        for it in range(max_iter):
+            mid = 0.5 * (lo + hi)
+
+            chi2_mid, red_mid, _, x_mid, method_mid = (
+                self._chi2_reduced_type_with_sigma_fast(
+                    type_id,
+                    sigma=mid,
+                    tol=solve_tol,
+                    maxiter=solve_maxiter,
+                    x0=x0,
+                )
+            )
+
+            self._print_zero(
+                " --- iter %02i sigma = %.6e  chi2/dof = %.6f  solver = %s"
+                % (it + 1, mid, red_mid, method_mid)
+            )
+
+            best_sigma = mid
+            best_red = red_mid
+            x0 = x_mid
+
+            if abs(red_mid - target_red_chi2) <= etol:
+                self._print_zero(
+                    " --- success: %s_Sigma_NL = %.6e gives chi2/dof = %.6f"
+                    % (name, best_sigma, best_red)
+                )
+                return best_sigma, True
+
+            if red_mid > target_red_chi2:
+                lo = mid
+            else:
+                hi = mid
+
+        self._print_zero(
+            " --- reached max_iter: %s_Sigma_NL = %.6e gives chi2/dof = %.6f"
+            % (name, best_sigma, best_red)
+        )
+
+        return best_sigma, abs(best_red - target_red_chi2) <= etol
+    
+    def _get_rowdist_diag(self, A_local, row_ind):
+        """Return the diagonal of a row-distributed matrix."""
+        n = A_local.shape[1]
+
+        d_local = np.zeros(n, dtype=np.float64)
+
+        for iloc, iglob in enumerate(row_ind):
+            d_local[iglob] = A_local[iloc, iglob]
+
+        d = self.MPI.sum(d_local)
+
+        if self.rank != 0:
+            d = None
+
+        d = self.MPI.broadcast(d)
+
+        return np.asarray(d, dtype=np.float64)
+
+
+    def _make_rowdist_operator(self, A_local, jitter=0.0):
+        """Make LinearOperator for A + jitter I."""
+        n = A_local.shape[1]
+
+        def matvec(x):
+            y = self._matvec_rowdist(A_local, x)
+
+            if jitter != 0.0:
+                y = y + jitter*x
+
+            return y
+
+        return LinearOperator(
+            shape=(n, n),
+            matvec=matvec,
+            dtype=np.float64,
+        )
+
+
+    def _make_rowdist_jacobi_preconditioner(self, A_local, row_ind, jitter=0.0):
+        """Make a simple positive Jacobi preconditioner."""
+        diag = self._get_rowdist_diag(A_local, row_ind)
+
+        if jitter != 0.0:
+            diag = diag + jitter
+
+        scale = np.median(np.abs(diag))
+
+        if not np.isfinite(scale) or scale <= 0.0:
+            scale = np.max(np.abs(diag))
+
+        if not np.isfinite(scale) or scale <= 0.0:
+            scale = 1.0
+
+        floor = 1e-12 * scale
+
+        # Use abs(diag) so the preconditioner is positive even if A is indefinite.
+        inv_diag = 1.0 / (np.abs(diag) + floor)
+
+        n = len(diag)
+
+        return LinearOperator(
+            shape=(n, n),
+            matvec=lambda x: inv_diag*x,
+            dtype=np.float64,
+        )
+
+    def _rowdist_relative_residual(self, A_local, x, b, jitter=0.0):
+        """Explicitly compute ||b - (A + jitter I)x|| / ||b||."""
+        Ax = self._matvec_rowdist(A_local, x)
+
+        if jitter != 0.0:
+            Ax = Ax + jitter*x
+
+        r = b - Ax
+
+        bnorm = np.linalg.norm(b)
+
+        if bnorm == 0.0:
+            return np.linalg.norm(r)
+
+        return np.linalg.norm(r) / bnorm
+    
+    def _solve_eta_rowdist_auto(
+        self,
+        A_local,
+        b,
+        row_ind=None,
+        tol=1e-7,
+        accept_tol=1e-6,
+        maxiter=1000,
+        gmres_restart=100,
+        allow_jitter=True,
+    ):
+        """Solve A eta = b using several distributed iterative solvers.
+
+        Tries:
+            CG          if the matrix behaves SPD
+            MINRES      if the matrix is symmetric but indefinite
+            BiCGSTAB    if the matrix is mildly nonsymmetric
+            GMRES       robust fallback
+            jittered GMRES if the system is badly conditioned
+
+        No inverse is formed.
+        """
+        b = np.asarray(b, dtype=np.float64)
+
+        if row_ind is None:
+            row_ind = self.cov_rows
+
+        # Matrix scale used for relative jitter.
+        diag = self._get_rowdist_diag(A_local, row_ind)
+        scale = np.median(np.abs(diag))
+
+        if not np.isfinite(scale) or scale <= 0.0:
+            scale = np.max(np.abs(diag))
+
+        if not np.isfinite(scale) or scale <= 0.0:
+            scale = 1.0
+
+        jitter_factors = [0.0]
+
+        if allow_jitter:
+            jitter_factors += [1e-12, 1e-10, 1e-8, 1e-6]
+
+        best_x = None
+        best_relres = np.inf
+        best_name = None
+        best_jitter = 0.0
+
+        for jf in jitter_factors:
+
+            jitter = jf * scale
+
+            if jitter == 0.0:
+                self._print_zero(" - Trying covariance solve with no jitter")
+            else:
+                self._print_zero(
+                    " - Trying covariance solve with jitter = %.6e" % jitter
+                )
+
+            Aop = self._make_rowdist_operator(A_local, jitter=jitter)
+            Mop = self._make_rowdist_jacobi_preconditioner(
+                A_local,
+                row_ind,
+                jitter=jitter,
+            )
+
+            solvers = []
+
+            # Only try CG without jitter or with positive jitter.
+            solvers.append("cg")
+
+            # MINRES is good for symmetric indefinite matrices.
+            solvers.append("minres")
+
+            # BiCGSTAB is cheaper than GMRES and handles mild nonsymmetry.
+            solvers.append("bicgstab")
+
+            # GMRES is the robust fallback.
+            solvers.append("gmres")
+
+            for solver_name in solvers:
+
+                self._print_zero(" -- Trying", solver_name.upper())
+
+                try:
+                    if solver_name == "cg":
+                        try:
+                            x, info = cg(
+                                Aop,
+                                b,
+                                M=Mop,
+                                rtol=tol,
+                                atol=0.0,
+                                maxiter=maxiter,
+                            )
+                        except TypeError:
+                            x, info = cg(
+                                Aop,
+                                b,
+                                M=Mop,
+                                tol=tol,
+                                atol=0.0,
+                                maxiter=maxiter,
+                            )
+
+                    elif solver_name == "minres":
+                        try:
+                            x, info = minres(
+                                Aop,
+                                b,
+                                M=Mop,
+                                rtol=tol,
+                                maxiter=maxiter,
+                            )
+                        except TypeError:
+                            x, info = minres(
+                                Aop,
+                                b,
+                                M=Mop,
+                                tol=tol,
+                                maxiter=maxiter,
+                            )
+
+                    elif solver_name == "bicgstab":
+                        try:
+                            x, info = bicgstab(
+                                Aop,
+                                b,
+                                M=Mop,
+                                rtol=tol,
+                                atol=0.0,
+                                maxiter=maxiter,
+                            )
+                        except TypeError:
+                            x, info = bicgstab(
+                                Aop,
+                                b,
+                                M=Mop,
+                                tol=tol,
+                                atol=0.0,
+                                maxiter=maxiter,
+                            )
+
+                    elif solver_name == "gmres":
+                        try:
+                            x, info = gmres(
+                                Aop,
+                                b,
+                                M=Mop,
+                                rtol=tol,
+                                atol=0.0,
+                                restart=gmres_restart,
+                                maxiter=maxiter,
+                            )
+                        except TypeError:
+                            x, info = gmres(
+                                Aop,
+                                b,
+                                M=Mop,
+                                tol=tol,
+                                atol=0.0,
+                                restart=gmres_restart,
+                                maxiter=maxiter,
+                            )
+
+                except Exception as err:
+                    self._print_zero(
+                        " --- %s failed with exception: %s"
+                        % (solver_name.upper(), str(err))
+                    )
+                    continue
+
+                relres = self._rowdist_relative_residual(
+                    A_local,
+                    x,
+                    b,
+                    jitter=jitter,
+                )
+
+                self._print_zero(
+                    " --- %s info = %s, relres = %.6e"
+                    % (solver_name.upper(), str(info), relres)
+                )
+
+                if relres < best_relres:
+                    best_x = np.asarray(x, dtype=np.float64)
+                    best_relres = relres
+                    best_name = solver_name
+                    best_jitter = jitter
+
+                # Accept either official convergence or explicit residual convergence.
+                if info == 0 and relres <= accept_tol:
+                    self._print_zero(
+                        " - Accepted %s solve: relres = %.6e, jitter = %.6e"
+                        % (solver_name.upper(), relres, jitter)
+                    )
+
+                    self.cov_solve_method = solver_name
+                    self.cov_solve_relres = relres
+                    self.cov_solve_jitter = jitter
+
+                    return np.asarray(x, dtype=np.float64)
+
+                # Sometimes scipy returns nonzero info but the explicit residual is fine.
+                if relres <= accept_tol:
+                    self._print_zero(
+                        " - Accepted %s solve despite info=%s: relres = %.6e, jitter = %.6e"
+                        % (solver_name.upper(), str(info), relres, jitter)
+                    )
+
+                    self.cov_solve_method = solver_name
+                    self.cov_solve_relres = relres
+                    self.cov_solve_jitter = jitter
+
+                    return np.asarray(x, dtype=np.float64)
+
+        # Last resort: if the best solution is not terrible, use it.
+        relaxed_accept = 1e-4
+
+        if best_x is not None and best_relres <= relaxed_accept:
+            self._print_zero(
+                " - WARNING: using best relaxed covariance solve."
+            )
+            self._print_zero(
+                " -- method = %s, relres = %.6e, jitter = %.6e"
+                % (best_name, best_relres, best_jitter)
+            )
+
+            self.cov_solve_method = best_name
+            self.cov_solve_relres = best_relres
+            self.cov_solve_jitter = best_jitter
+
+            return best_x
+
+        raise np.linalg.LinAlgError(
+            "All covariance solvers failed. Best method=%s, best relres=%.6e, jitter=%.6e"
+            % (str(best_name), best_relres, best_jitter)
+        )
+
     # Wiener Filtering ----------------------------------------------------
 
     def _save_cov(self):
@@ -1052,89 +2285,90 @@ class MIMIC:
         fname = self._get_fname_prefix() + 'cov.npz'
         np.savez(fname, cov=self.cov, c=self.cons_c, c_type=self.cons_c_type)
 
-
-    def _cov_opt(self):
-        """Optimise covariance non-linear dispersion"""
+    
+    def _cov_opt_fast(self):
+        """Fast covariance nonlinear-dispersion optimisation."""
         self._print_zero()
-        self._print_zero(" - Optimising non-linear dispersion errors [at MPI.rank = 0]")
+        self._print_zero(" - Fast optimisation of nonlinear dispersion errors")
 
-        # Density non-linear dispersion
-        cond = np.where(self.cons_c_type == 0)[0]
-        if len(cond) > 0:
-            self._print_zero(" -- Optimising density dispersion [at MPI.rank = 0]")
-            if self.MPI.rank == 0:
-                _cov = self.cov[cond]
-                _cov = _cov[:, cond]
-                success, sigma_NL = theory.cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
-                    _cov, max_sig_NL=10., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
-            else:
-                success, sigma_NL = None, None
+        sigma, success = self._optimise_sigma_NL_type_fast(
+            type_id=0,
+            name="dens",
+            max_sigma=10.0,
+            etol=0.03,
+            max_iter=8,
+            solve_tol=1e-4,
+            solve_maxiter=200,
+        )
 
-            self.MPI.wait()
+        if success:
+            self.constraints["dens_Sigma_NL"] = sigma
+        else:
+            self.ERROR = True
 
-            success = self.MPI.broadcast(success)
-            sigma_NL = self.MPI.broadcast(sigma_NL)
+        io._error_message(self.ERROR, "Density dispersion optimisation failed.", MPI=self.MPI)
 
-            if success:
-                self.constraints["den_Sigma_NL"] = sigma_NL
-            else:
-                self.ERROR = True
-            io._error_message(self.ERROR, "Density dispersion optimisation failed.")
-            self._break4error()
+        self._break4error()
 
-        self.constraints["vel_Sigma_NL"] = self.MPI.broadcast(self.constraints["vel_Sigma_NL"])
+        sigma, success = self._optimise_sigma_NL_type_fast(
+            type_id=1,
+            name="psi",
+            max_sigma=5.0,
+            etol=0.03,
+            max_iter=8,
+            solve_tol=1e-4,
+            solve_maxiter=200,
+        )
 
-        # Displacement non-linear dispersion
-        cond = np.where(self.cons_c_type == 1)[0]
-        if len(cond) > 0:
-            self._print_zero(" -- Optimising displacement dispersion [at MPI.rank = 0]")
-            if self.MPI.rank == 0:
-                _cov = self.cov[cond]
-                _cov = _cov[:, cond]
-                success, sigma_NL = theory.cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
-                    _cov, max_sig_NL=5., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
-            else:
-                success, sigma_NL = None, None
+        if success:
+            self.constraints["psi_Sigma_NL"] = sigma
+        else:
+            self.ERROR = True
 
-            self.MPI.wait()
+        io._error_message(
+            self.ERROR,
+            "Displacement dispersion optimisation failed.",
+            MPI=self.MPI,
+        )
+        self._break4error()
 
-            success = self.MPI.broadcast(success)
-            sigma_NL = self.MPI.broadcast(sigma_NL)
+        sigma, success = self._optimise_sigma_NL_type_fast(
+            type_id=2,
+            name="vel",
+            max_sigma=400.0,
+            etol=0.03,
+            max_iter=8,
+            solve_tol=1e-4,
+            solve_maxiter=200,
+        )
 
-            if success:
-                self.constraints["psi_Sigma_NL"] = sigma_NL
-            else:
-                self.ERROR = True
-            io._error_message(self.ERROR, "Displacement dispersion optimisation failed.")
-            self._break4error()
+        if success:
+            self.constraints["vel_Sigma_NL"] = sigma
+        else:
+            self.ERROR = True
 
-        self.constraints["psi_Sigma_NL"] = self.MPI.broadcast(self.constraints["psi_Sigma_NL"])
+        io._error_message(
+            self.ERROR,
+            "Velocity dispersion optimisation failed.",
+            MPI=self.MPI,
+        )
+        self._break4error()
 
-        # Velocity non-linear dispersion
-        cond = np.where(self.cons_c_type == 2)[0]
-        if len(cond) > 0:
-            self._print_zero(" -- Optimising velocity dispersion [at MPI.rank = 0]")
-            if self.MPI.rank == 0:
-                _cov = self.cov[cond]
-                _cov = _cov[:, cond]
-                success, sigma_NL = theory.cov_optimiser.optimize_sigma_NL(self.cons_c[cond],
-                    _cov, max_sig_NL=400., etol=0.01, prefix=' --- ', verbose=True, MPI=self.MPI)
-            else:
-                success, sigma_NL = None, None
+        self.constraints["dens_Sigma_NL"] = self.MPI.broadcast(
+            self.constraints["dens_Sigma_NL"]
+        )
+        self.constraints["psi_Sigma_NL"] = self.MPI.broadcast(
+            self.constraints["psi_Sigma_NL"]
+        )
+        self.constraints["vel_Sigma_NL"] = self.MPI.broadcast(
+            self.constraints["vel_Sigma_NL"]
+        )
 
-            self.MPI.wait()
-
-            success = self.MPI.broadcast(success)
-            sigma_NL = self.MPI.broadcast(sigma_NL)
-
-            if success:
-                self.constraints["vel_Sigma_NL"] = sigma_NL
-            else:
-                self.ERROR = True
-            io._error_message(self.ERROR, "Velocity dispersion optimisation failed.")
-            self._break4error()
-
-        self.constraints["vel_Sigma_NL"] = self.MPI.broadcast(self.constraints["vel_Sigma_NL"])
+        self._print_zero()
+        self._print_zero(" - Optimised nonlinear dispersions:")
+        self._print_zero(" -- dens_Sigma_NL =", self.constraints["dens_Sigma_NL"])
+        self._print_zero(" -- psi_Sigma_NL  =", self.constraints["psi_Sigma_NL"])
+        self._print_zero(" -- vel_Sigma_NL  =", self.constraints["vel_Sigma_NL"])
 
 
     def compute_cov(self):
@@ -1144,59 +2378,99 @@ class MIMIC:
         self._print_zero(" =================================")
         self._print_zero()
 
-        x1, x2 = self.MPI_create_split_ndgrid(self.MPI, [self.cons_x, self.cons_x], [False, True])
-        y1, y2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_y, self.cons_y], [False, True])
-        z1, z2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_z, self.cons_z], [False, True])
+        ncons = len(self.cons_c)
 
-        ex1, ex2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ex, self.cons_ex], [False, True])
-        ey1, ey2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ey, self.cons_ey], [False, True])
-        ez1, ez2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ez, self.cons_ez], [False, True])
+        self.cov_rows = self.MPI.split_array(np.arange(ncons))
+        rows = self.cov_rows
 
-        type1, type2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_c_type, self.cons_c_type], [False, True])
+        x1, x2 = np.meshgrid(self.cons_x[rows], self.cons_x, indexing='ij')
+        y1, y2 = np.meshgrid(self.cons_y[rows], self.cons_y, indexing='ij')
+        z1, z2 = np.meshgrid(self.cons_z[rows], self.cons_z, indexing='ij')
+
+        ex1, ex2 = np.meshgrid(self.cons_ex[rows], self.cons_ex, indexing='ij')
+        ey1, ey2 = np.meshgrid(self.cons_ey[rows], self.cons_ey, indexing='ij')
+        ez1, ez2 = np.meshgrid(self.cons_ez[rows], self.cons_ez, indexing='ij')
+
+        type1, type2 = np.meshgrid(
+            self.cons_c_type[rows],
+            self.cons_c_type,
+            indexing='ij'
+        )
 
         self._print_zero(" - Compute constraint-constraint covariance matrix in parallel")
 
-        _cov = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-            type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-            self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-            self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-            minlogr=-2)
+        if self.constraints["gridcorr"]:
+            _cov = theory.get_cc_matrix_fast_grid(
+                x1, x2, y1, y2, z1, z2,
+                ex1, ex2, ey1, ey2, ez1, ez2, type1, type2,
+                self.corr_redshift, self.interp_Hz, self.xi_box, self.zeta_p_box, self.zeta_u_box, 
+                self.psixx_pp_box, self.psixy_pp_box, self.psixx_pu_box, self.psixy_pu_box, 
+                self.psixx_uu_box, self.psixy_uu_box, self.siminfo["Boxsize"], self.stretch_grid
+            )
+        else:
+            _cov = theory.get_cc_matrix_fast(
+                x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2, type1, type2, self.corr_redshift, 
+                self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, 
+                self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, 
+                self.interp_psiT_uu, self.siminfo["Boxsize"]
+            )
+        
+        # if self.constraints["CovOptimise"]:
+        #     self._cov_opt()
 
-        self._print_zero(" - Collect constraint-constraint covariance matrix [at MPI.rank = 0]")
+        self._print_zero(" - Keep constraint-constraint covariance matrix row-distributed")
 
-        self.cov = self.MPI.collect(_cov)
-        self.cov = self.MPI.broadcast(self.cov)
-        self.cov = self.cov + np.diag(self.cons_c_err**2.)
+        ncons = len(self.cons_c)
 
-        if self.constraints["CovOptimise"]:
-            self._cov_opt()
+        self.cov_rows = self.MPI.split_array(np.arange(ncons))
+        self.cov = np.asarray(_cov, dtype=np.float64)
 
-        if self.rank == 0:
-            sigma_NL = np.ones(len(self.cons_c))
+        self._add_diag_to_local_rows(
+            self.cov,
+            self.cov_rows,
+            self.cons_c_err**2.
+        )
+        # Optimise nonlinear dispersions using the base covariance plus measurement errors.
+        # This should happen BEFORE adding sigma_NL**2 to self.cov.
+        if self.constraints.get("CovOptimise", False):
+            self._cov_opt_fast()
+        
+        sigma_NL = np.ones(len(self.cons_c))
 
-            cond = np.where(self.cons_c_type == 0)[0]
-            sigma_NL[cond] = self.constraints["dens_Sigma_NL"]
+        cond = np.where(self.cons_c_type == 0)[0]
+        sigma_NL[cond] = self.constraints["dens_Sigma_NL"]
 
-            cond = np.where(self.cons_c_type == 1)[0]
-            sigma_NL[cond] = self.constraints["psi_Sigma_NL"]
+        cond = np.where(self.cons_c_type == 1)[0]
+        sigma_NL[cond] = self.constraints["psi_Sigma_NL"]
 
-            cond = np.where(self.cons_c_type == 2)[0]
-            sigma_NL[cond] = self.constraints["vel_Sigma_NL"]
+        cond = np.where(self.cons_c_type == 2)[0]
+        sigma_NL[cond] = self.constraints["vel_Sigma_NL"]
 
-            self.cov = self.cov + np.diag(sigma_NL**2)
+        self._add_diag_to_local_rows(
+            self.cov,
+            self.cov_rows,
+            sigma_NL**2.
+        )
 
-            self._save_cov()
+        self._print_zero(" - Solving covariance system with automatic distributed solver")
 
-            self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
-            self.inv = np.linalg.inv(self.cov)
+        self.eta = self._solve_eta_rowdist_auto(
+            self.cov,
+            self.cons_c,
+            row_ind=self.cov_rows,
+            tol=1e-7,
+            accept_tol=1e-6,
+            maxiter=1000,
+            gmres_restart=100,
+            allow_jitter=True,
+        )
+        
+        # Useful final diagnostic.
+        chi2 = float(np.dot(self.cons_c, self.eta))
+        red_chi2 = chi2 / float(len(self.cons_c))
 
-            self._print_zero(" - Compute eta vector [at MPI.rank = 0]")
-            self.eta = self.inv.dot(self.cons_c)
-
-        self._print_zero(" - Broadcast eta vector")
-        self.cov = self.MPI.broadcast(self.cov)
-        self.eta = self.MPI.broadcast(self.eta)
-        self.inv = self.MPI.broadcast(self.inv)
+        self._print_zero(" - Final full chi2      =", chi2)
+        self._print_zero(" - Final full chi2/dof  =", red_chi2)
 
         self.MPI.wait()
 
@@ -1295,6 +2569,7 @@ class MIMIC:
             np.savez(fname, Boxsize=self.siminfo["Boxsize"], Ngrid=self.siminfo["Ngrid"],
                 x3D=self.x3D, y3D=self.y3D, z3D=self.z3D)
 
+
     def _MPI_save_sub_xyz(self, suffix="sub_XYZ"):
         """Saves the 3 dimensional grid."""
         fname_prefix = self._get_fname_prefix()
@@ -1327,47 +2602,6 @@ class MIMIC:
         self._MPI_save_xyz()
         suffix = "WF_" + field
         self._MPI_savez(suffix, WF=WF)
-
-
-    def _save_WF_var(self, field, WF_var):
-        """Saves the WF field variance."""
-        self._MPI_save_xyz()
-        suffix = "WF_"+ field + "_var"
-        self._MPI_savez(suffix, WF_var=WF_var)
-
-
-    def _save_sub_WF(self, field, sub_WF):
-        """Saves the WF subbox field."""
-        self._MPI_save_sub_xyz()
-        suffix = "sub_WF_" + field
-        self._MPI_savez(suffix, sub_WF=sub_WF)
-
-    def _save_sub_WF_var(self, field, sub_WF_var):
-        """Saves the WF subbox field variance."""
-        self._MPI_save_sub_xyz()
-        suffix = "sub_WF_"+ field + "_var"
-        self._MPI_savez(suffix, sub_WF_var=sub_WF_var)
-
-    def _save_cons_WF(self, field, ind, WF, WF_var=None):
-        """Saves the WF subbox field."""
-        _ind = self.MPI.collect(ind)
-        _WF = self.MPI.collect(WF)
-        if WF_var is not None:
-            _WF_var = self.MPI.collect(WF_var)
-        if self.MPI.rank == 0:
-            suffix = "cons_WF_" + field
-            # sort cons_WF
-            WF = _WF[_ind]
-            if WF_var is not None:
-                WF_var = _WF_var[_ind]
-            fname_prefix = self._get_fname_prefix()
-            fname = fname_prefix + suffix + ".npz"
-            self._print_zero(" - Saving to :", fname_prefix+suffix+".npz")
-            np.savez(fname, x=self.cons_x-self.halfsize, y=self.cons_y-self.halfsize,
-                z=self.cons_z-self.halfsize, ex=self.cons_ex, ey=self.cons_ey,
-                ez=self.cons_ez, c=self.cons_c, c_err=self.cons_c_err,
-                c_type=self.cons_c_type, WF=WF, WF_var=WF_var)
-        self.MPI.wait()
 
 
     def get_WF(self):
@@ -1424,7 +2658,7 @@ class MIMIC:
             exi, eyi, ezi = 0., 0., 1.
         elif self.WF["Field"] == "vel_r":
             self._print_zero(" - Computing Wiener Filter velocity in r")
-            typei = 1
+            typei = 2
             exi = self.x3D - self.halfsize
             eyi = self.y3D - self.halfsize
             ezi = self.z3D - self.halfsize
@@ -1434,89 +2668,31 @@ class MIMIC:
             ezi /= _r
 
         if self.what2run["WF"]:
-            WF = theory.get_corr_dot_eta_fast(self.x3D, self.cons_x, self.y3D, self.cons_y,
-                self.z3D, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
-                typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
-                self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
-                self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
-                self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
-                mpi_rank=self.MPI.rank, minlogr=-2)
-
-        if self.what2run["WF_Var"]:
-            self._print_zero()
-
-            if self.WF["Field"] == "dens":
-                self._print_zero(" - Computing Wiener Filter variance in density")
-                typei = 0
-                exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-            elif self.WF["Field"] == "psi_x":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in x")
-                typei = 1
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "psi_y":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in y")
-                typei = 1
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "psi_z":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in z")
-                typei = 1
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "psi_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 1
-                exi = self.x3D - self.halfsize
-                eyi = self.y3D - self.halfsize
-                ezi = self.z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-            elif self.WF["Field"] == "vel_x":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in x")
-                typei = 2
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "vel_y":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in y")
-                typei = 2
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "vel_z":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in z")
-                typei = 2
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "vel_r":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in r")
-                typei = 1
-                exi = self.x3D - self.halfsize
-                eyi = self.y3D - self.halfsize
-                ezi = self.z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-
-            WF_var = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, eyi, eyi,
-                ezi, ezi, typei, typei, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-                self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-                self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-                minlogr=-2)
-
-            WF_var -= theory.get_corr1_dot_inv_dot_corr2_fast(self.x3D, np.copy(self.x3D), self.cons_x,
-                self.y3D, np.copy(self.y3D), self.cons_y, self.z3D, np.copy(self.z3D), self.cons_z,
-                exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
-                self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
-                self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
-                self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
-                len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
+            if self.constraints["gridcorr"]:
+                WF = theory.get_corr_dot_eta_fast_grid(
+                    self.x3D, self.cons_x, self.y3D, self.cons_y, self.z3D, self.cons_z, 
+                    exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
+                    typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, 
+                    self.xi_box, self.zeta_p_box, self.zeta_u_box, self.psixx_pp_box, self.psixy_pp_box,
+                    self.psixx_pu_box, self.psixy_pu_box, self.psixx_uu_box, self.psixy_uu_box, self.eta,
+                    self.siminfo["Boxsize"], self._lenpro+2, prefix, self.stretch_grid, mpi_rank=self.MPI.rank,
+                )
+            else:
+                WF = theory.get_corr_dot_eta_fast(
+                    self.x3D, self.cons_x, self.y3D, self.cons_y, self.z3D, self.cons_z, 
+                    exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
+                    typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
+                    self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
+                    self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
+                    self.eta, self.siminfo["Boxsize"], self._lenpro+2, prefix, mpi_rank=self.MPI.rank, 
+                    minlogr=-2
+                )
 
         self.unflatten_grid3D()
 
         if self.what2run["WF"]:
             WF = WF.reshape(self.x_shape)
             self._save_WF(self.WF["Field"], WF)
-
-        if self.what2run["WF_Var"]:
-            WF_var = WF_var.reshape(self.x_shape)
-            self._save_WF_var(self.WF["Field"], WF_var)
 
         self._print_zero()
 
@@ -1540,307 +2716,7 @@ class MIMIC:
 
         if self.what2run["RZA"]:
             self.dens_WF = WF
-
-
-    def get_sub_WF(self):
-        """Computes the sub-box WF reconstruction"""
-        self._print_zero()
-        self._print_zero(" Compute Sub-Box Wiener Filter")
-        self._print_zero(" =============================")
-        self._print_zero()
-
-        self.get_subgrid3D()
-        self.flatten_subgrid3D()
-
-        self._print_zero()
-
-        prefix = " ---- "
-
-        if self.WF["Field"] == "dens":
-            self._print_zero(" - Computing Wiener Filter density")
-            typei = 0
-            exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-        elif self.WF["Field"] == "psi_x":
-            self._print_zero(" - Computing Wiener Filter displacment in x")
-            typei = 1
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "psi_y":
-            self._print_zero(" - Computing Wiener Filter displacment in y")
-            typei = 1
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "psi_z":
-            self._print_zero(" - Computing Wiener Filter displacment in z")
-            typei = 1
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "psi_r":
-            self._print_zero(" - Computing Wiener Filter displacment in r")
-            typei = 1
-            exi = self.sub_x3D - self.halfsize
-            eyi = self.sub_y3D - self.halfsize
-            ezi = self.sub_z3D - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-        elif self.WF["Field"] == "vel_x":
-            self._print_zero(" - Computing Wiener Filter velocity in x")
-            typei = 2
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "vel_y":
-            self._print_zero(" - Computing Wiener Filter velocity in y")
-            typei = 2
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "vel_z":
-            self._print_zero(" - Computing Wiener Filter velocity in z")
-            typei = 2
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "vel_r":
-            self._print_zero(" - Computing Wiener Filter velocity in r")
-            typei = 2
-            exi = self.sub_x3D - self.halfsize
-            eyi = self.sub_y3D - self.halfsize
-            ezi = self.sub_z3D - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-
-        if self.what2run["WF_SubBox"]:
-            WF = theory.get_corr_dot_eta_fast(self.sub_x3D, self.cons_x, self.sub_y3D, self.cons_y,
-                self.sub_z3D, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
-                typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
-                self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
-                self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
-                self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
-                mpi_rank=self.MPI.rank, minlogr=-2)
-
-        if self.what2run["WF_SubVar"]:
-            self._print_zero()
-
-            if self.WF["Field"] == "dens":
-                self._print_zero(" - Computing Wiener Filter variance in density")
-                typei = 0
-                exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-            elif self.WF["Field"] == "psi_x":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in x")
-                typei = 1
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "psi_y":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in y")
-                typei = 1
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "psi_z":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in z")
-                typei = 1
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "psi_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 1
-                exi = self.sub_x3D - self.halfsize
-                eyi = self.sub_y3D - self.halfsize
-                ezi = self.sub_z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-            elif self.WF["Field"] == "vel_x":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in x")
-                typei = 2
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "vel_y":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in y")
-                typei = 2
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "vel_z":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in z")
-                typei = 2
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "vel_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 2
-                exi = self.sub_x3D - self.halfsize
-                eyi = self.sub_y3D - self.halfsize
-                ezi = self.sub_z3D - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-
-            WF_var = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, eyi, eyi,
-                ezi, ezi, typei, typei, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-                self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-                self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-                minlogr=-2)
-
-            WF_var -= theory.get_corr1_dot_inv_dot_corr2_fast(self.sub_x3D, np.copy(self.sub_x3D), self.cons_x,
-                self.sub_y3D, np.copy(self.sub_y3D), self.cons_y, self.sub_z3D, np.copy(self.sub_z3D), self.cons_z,
-                exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
-                self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
-                self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
-                self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
-                len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
-
-        self.unflatten_subgrid3D()
-
-        if self.what2run["WF_SubBox"]:
-            WF = WF.reshape(self.sub_x_shape)
-            self._save_sub_WF(self.WF["Field"], WF)
-
-        if self.what2run["WF_SubVar"]:
-            WF_var = WF_var.reshape(self.sub_x_shape)
-            self._save_sub_WF_var(self.WF["Field"], WF_var)
-
-        self._print_zero()
-
-
-    def get_cons_WF(self):
-        """Computes the WF reconstruction"""
-        self._print_zero()
-        self._print_zero(" Compute Constraint Wiener Filter")
-        self._print_zero(" ================================")
-        self._print_zero()
-
-        self._print_zero(" Split constrained position points across processors")
-
-        _ind = self.MPI.split_array(np.arange(len(self.cons_x)))
-        _cons_x = self.MPI.split_array(np.copy(self.cons_x))
-        _cons_y = self.MPI.split_array(np.copy(self.cons_y))
-        _cons_z = self.MPI.split_array(np.copy(self.cons_z))
-
-        self._print_zero()
-
-        prefix = " ---- "
-
-        if self.WF["Field"] == "dens":
-            self._print_zero(" - Computing Wiener Filter density")
-            typei = 0
-            exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-        elif self.WF["Field"] == "psi_x":
-            self._print_zero(" - Computing Wiener Filter displacment in x")
-            typei = 1
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "psi_y":
-            self._print_zero(" - Computing Wiener Filter displacment in y")
-            typei = 1
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "psi_z":
-            self._print_zero(" - Computing Wiener Filter displacment in z")
-            typei = 1
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "psi_r":
-            self._print_zero(" - Computing Wiener Filter displacment in r")
-            typei = 1
-            exi = _cons_x - self.halfsize
-            eyi = _cons_y - self.halfsize
-            ezi = _cons_z - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-        elif self.WF["Field"] == "vel_x":
-            self._print_zero(" - Computing Wiener Filter velocity in x")
-            typei = 2
-            exi, eyi, ezi = 1., 0., 0.
-        elif self.WF["Field"] == "vel_y":
-            self._print_zero(" - Computing Wiener Filter velocity in y")
-            typei = 2
-            exi, eyi, ezi = 0., 1., 0.
-        elif self.WF["Field"] == "vel_z":
-            self._print_zero(" - Computing Wiener Filter velocity in z")
-            typei = 2
-            exi, eyi, ezi = 0., 0., 1.
-        elif self.WF["Field"] == "vel_r":
-            self._print_zero(" - Computing Wiener Filter velocity in r")
-            typei = 1
-            exi = _cons_x - self.halfsize
-            eyi = _cons_y - self.halfsize
-            ezi = _cons_z - self.halfsize
-            _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-            exi /= _r
-            eyi /= _r
-            ezi /= _r
-
-        if self.what2run["WF_Cons"]:
-            WF = theory.get_corr_dot_eta_fast(_cons_x, self.cons_x, _cons_y, self.cons_y,
-                _cons_z, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
-                typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
-                self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
-                self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
-                self.eta, self.siminfo["Boxsize"], self._lenpro+2, len(prefix), prefix,
-                mpi_rank=self.MPI.rank, minlogr=-2)
-
-        if self.what2run["WF_ConsVar"]:
-            self._print_zero()
-
-            if self.WF["Field"] == "dens":
-                self._print_zero(" - Computing Wiener Filter variance in density")
-                typei = 0
-                exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
-            elif self.WF["Field"] == "psi_x":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in x")
-                typei = 1
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "psi_y":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in y")
-                typei = 1
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "psi_z":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in z")
-                typei = 1
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "psi_r":
-                self._print_zero(" - Computing Wiener Filter variance in displacment in r")
-                typei = 1
-                exi = _cons_x - self.halfsize
-                eyi = _cons_y - self.halfsize
-                ezi = _cons_z - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-            elif self.WF["Field"] == "vel_x":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in x")
-                typei = 2
-                exi, eyi, ezi = 1., 0., 0.
-            elif self.WF["Field"] == "vel_y":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in y")
-                typei = 2
-                exi, eyi, ezi = 0., 1., 0.
-            elif self.WF["Field"] == "vel_z":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in z")
-                typei = 2
-                exi, eyi, ezi = 0., 0., 1.
-            elif self.WF["Field"] == "vel_r":
-                self._print_zero(" - Computing Wiener Filter variance in velocity in r")
-                typei = 1
-                exi = _cons_x - self.halfsize
-                eyi = _cons_y - self.halfsize
-                ezi = _cons_z - self.halfsize
-                _r = np.sqrt(exi**2. + eyi**2. + ezi**2.)
-                exi /= _r
-                eyi /= _r
-                ezi /= _r
-
-            WF_var = theory.get_cc_float_fast(0., 0., 0., 0., 0., 0., exi, exi, eyi, eyi,
-                ezi, ezi, typei, typei, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-                self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-                self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-                minlogr=-2)
-
-            WF_var -= theory.get_corr1_dot_inv_dot_corr2_fast(_cons_x, np.copy(_cons_x), self.cons_x,
-                _cons_y, np.copy(_cons_y), self.cons_y, _cons_z, np.copy(_cons_z), self.cons_z,
-                exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, typei, self.cons_c_type,
-                self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u,
-                self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu,
-                self.interp_psiR_uu, self.interp_psiT_uu, self.inv, self.siminfo["Boxsize"], self._lenpro+2,
-                len(prefix), prefix, mpi_rank=self.MPI.rank, minlogr=-2, nlogr=1000)
-        else:
-            WF_var = None
-
-        self._save_cons_WF(self.WF["Field"], _ind, WF, WF_var=WF_var)
-
-        self._print_zero()
-
+    
 
     # FFT related functions ----------------------------------------------------
 
@@ -2056,6 +2932,10 @@ class MIMIC:
         self.cons_y = self.MPI.broadcast(self.cons_y)
         self.cons_z = self.MPI.broadcast(self.cons_z)
 
+        self.cons_x %= self.siminfo["Boxsize"]
+        self.cons_y %= self.siminfo["Boxsize"]
+        self.cons_z %= self.siminfo["Boxsize"]
+
         self.cons_ex = self.MPI.broadcast(self.cons_ex)
         self.cons_ey = self.MPI.broadcast(self.cons_ey)
         self.cons_ez = self.MPI.broadcast(self.cons_ez)
@@ -2164,7 +3044,7 @@ class MIMIC:
             Dz0 = self._get_growth_D(z1)
             densz = (Dz/Dz0)*dens
         return densz
-
+    
 
     def compute_eta_CR(self):
         """Computes the eta vector for a constrained realisation."""
@@ -2173,42 +3053,20 @@ class MIMIC:
         self._print_zero(" =====================")
         self._print_zero()
 
-        # x1, x2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_x, self.cons_x], [False, True])
-        # y1, y2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_y, self.cons_y], [False, True])
-        # z1, z2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_z, self.cons_z], [False, True])
-        #
-        # ex1, ex2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ex, self.cons_ex], [False, True])
-        # ey1, ey2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ey, self.cons_ey], [False, True])
-        # ez1, ez2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_ez, self.cons_ez], [False, True])
-        #
-        # type1, type2 = self.MPI_create_split_ndgrid(self.MPI,[self.cons_c_type, self.cons_c_type], [False, True])
-        #
-        # self._print_zero(" - Compute vel-vel covariance matrix in parallel")
-        #
-        # cov_cc = theory.get_cc_matrix_fast(x1, x2, y1, y2, z1, z2, ex1, ex2, ey1, ey2, ez1, ez2,
-        #     type1, type2, self.corr_redshift, self.interp_Hz, self.interp_xi, self.interp_zeta_p,
-        #     self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp, self.interp_psiR_pu,
-        #     self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu, self.siminfo["Boxsize"],
-        #     minlogr=-2)
-        #
-        # self._print_zero(" - Collect vel-vel covariance matrix [at MPI.rank = 0]")
-        #
-        # cov_cc = self.MPI.collect(cov_cc)
-        #
-        # if self.rank == 0:
-        #     cov_cc = cov_cc + np.diag(self.cons_c_err**2.)
-        #     # add sigma_NL more error?
-        #
-        #     self._print_zero(" - Inverting matrix [at MPI.rank = 0]")
-        #     inv_cc = np.linalg.inv(cov_cc)
+        self._print_zero(" - Compute eta_CR vector with distributed GMRES")
 
-        self._print_zero(" - Compute eta_CR vector [at MPI.rank = 0]")
-        self.eta_CR = self.inv.dot(self.cons_c - self.cons_c_RR)
+        rhs = self.cons_c - self.cons_c_RR
+
+        self.eta_CR = self._solve_eta_rowdist_gmres(
+            self.cov,
+            rhs,
+            tol=1e-8,
+            atol=0.0,
+            restart=50,
+            maxiter=500,
+        )
 
         self.MPI.wait()
-
-        self._print_zero(" - Broadcast eta_CR vector")
-        self.eta_CR = self.MPI.broadcast(self.eta_CR)
 
 
     def prep_CR(self):
@@ -2319,13 +3177,6 @@ class MIMIC:
 
         self.dens = self.dens.flatten()
 
-        # Hz = self.interp_Hz(z0)
-        #
-        # if self.constraints["Type"] == "Vel":
-        #     adot = theory.z2a(z0)*Hz
-        # elif self.constraints["Type"] == "Psi":
-        #     adot = 1.
-
         self._print_zero(" - Computing Constrained Realisation density")
 
         prefix = " ---- "
@@ -2333,14 +3184,23 @@ class MIMIC:
         typei = 0
         exi, eyi, ezi = 1./np.sqrt(3), 1./np.sqrt(3), 1./np.sqrt(3)
 
-        self.dens += theory.get_corr_dot_eta_fast(self.x3D, self.cons_x, self.y3D, self.cons_y,
-            self.z3D, self.cons_z, exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez,
-            typei, self.cons_c_type, self.corr_redshift, self.interp_Hz, self.interp_xi,
-            self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, self.interp_psiT_pp,
-            self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, self.interp_psiT_uu,
-            self.eta_CR, self.siminfo["Boxsize"], lenpro=self._lenpro+2, lenpre=len(prefix),
-            prefix=prefix, mpi_rank=self.MPI.rank, minlogr=-2)
-
+        if self.constraints["gridcorr"]:
+            self.dens += theory.get_corr_dot_eta_fast_grid(
+                self.x3D, self.cons_x, self.y3D, self.cons_y, self.z3D, self.cons_z,
+                exi, self.cons_ex, eyi, self.cons_ey, ezi, self.cons_ez, typei, self.cons_c_type, self.corr_redshift, 
+                self.interp_Hz, self.xi_box, self.zeta_p_box, self.zeta_u_box, self.psixx_pp_box, 
+                self.psixy_pp_box, self.psixx_pu_box, self.psixy_pu_box, self.psixx_uu_box, self.psixy_uu_box,
+                self.eta_CR, self.siminfo["Boxsize"], self._lenpro+2, prefix, self.stretch_grid, mpi_rank=self.MPI.rank
+            )
+        else:
+            self.dens += theory.get_corr_dot_eta_fast(
+                self.x3D, self.cons_x, self.y3D, self.cons_y, self.z3D, self.cons_z, exi, self.cons_ex, 
+                eyi, self.cons_ey, ezi, self.cons_ez, typei, self.cons_c_type, self.corr_redshift, 
+                self.interp_Hz, self.interp_xi, self.interp_zeta_p, self.interp_zeta_u, self.interp_psiR_pp, 
+                self.interp_psiT_pp, self.interp_psiR_pu, self.interp_psiT_pu, self.interp_psiR_uu, 
+                self.interp_psiT_uu, self.eta_CR, self.siminfo["Boxsize"], lenpro=self._lenpro+2, 
+                prefix=prefix, mpi_rank=self.MPI.rank, minlogr=-2
+            )
         self.unflatten_grid3D()
         self.dens = self.dens.reshape(self.x_shape)
 
@@ -2382,6 +3242,12 @@ class MIMIC:
 
         psi_x, psi_y, psi_z = self.dens2psi(self.dens)
         vel_x, vel_y, vel_z = self.psi2vel(z0, psi_x, psi_y, psi_z)
+
+        a_ic = theory.z2a(z0)
+
+        vel_x /= np.sqrt(a_ic)
+        vel_y /= np.sqrt(a_ic)
+        vel_z /= np.sqrt(a_ic)
 
         pos_x = self.x3D + psi_x
         pos_y = self.y3D + psi_y
@@ -2458,16 +3324,6 @@ class MIMIC:
             self.get_WF()
             self.time["WF_End"] = time.time()
 
-        if self.what2run["WF_SubBox"]:
-            self.time["WF_Sub_Start"] = time.time()
-            self.get_sub_WF()
-            self.time["WF_Sub_End"] = time.time()
-
-        if self.what2run["WF_Cons"]:
-            self.time["WF_Cons_Start"] = time.time()
-            self.get_cons_WF()
-            self.time["WF_Cons_End"] = time.time()
-
         if self.what2run["RZA"]:
             self.time["RZA_Start"] = time.time()
             self.get_RZA()
@@ -2524,7 +3380,6 @@ class MIMIC:
 
         Prep_str = " -> Theory Calculations       = "
         WF___str = " -> Wiener Filter             = "
-        SuWF_str = " -> SubBox Wiener Filter      = "
         ConWFstr = " -> Constraint Wiener Filter  = "
         RZA__str = " -> Reverse Zeldovich         = "
         RR___str = " -> Random Realisation        = "
@@ -2537,10 +3392,7 @@ class MIMIC:
 
         if self.what2run["WF"]:
             self._print_time(WF___str, self.time["WF_End"] - self.time["WF_Start"])
-
-        if self.what2run["WF_SubBox"]:
-            self._print_time(SuWF_str, self.time["WF_Sub_End"] - self.time["WF_Sub_Start"])
-
+        
         if self.what2run["WF_Cons"]:
             self._print_time(ConWFstr, self.time["WF_Cons_End"] - self.time["WF_Cons_Start"])
 

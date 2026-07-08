@@ -1,6 +1,8 @@
 import numpy as np
+from numba import njit
 
 
+@njit
 def progress_bar(i, total, lenchar, prefix):
     """Display a simple text progress bar to stdout.
 

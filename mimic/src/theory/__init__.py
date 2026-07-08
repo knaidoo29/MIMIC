@@ -2,6 +2,8 @@
 # Coordinate distances for (non)periodic boxes.
 from .coords import distance_1D
 from .coords import distance_3D
+from .coords import stretch_sin_backward
+from .coords import stretch_sin_forward
 
 # Isotropic correlation functions
 from .pk2corr import pk2xi
@@ -16,7 +18,11 @@ from .correlate import get_cc_float_fast
 from .correlate import get_cc_vector_fast
 from .correlate import get_cc_matrix_fast
 from .correlate import get_corr_dot_eta_fast
-from .correlate import get_corr1_dot_inv_dot_corr2_fast
+
+from .correlate import get_cc_float_fast_grid
+from .correlate import get_cc_vector_fast_grid
+from .correlate import get_cc_matrix_fast_grid
+from .correlate import get_corr_dot_eta_fast_grid
 
 # Covariance optimisation function
 from .cov_optimiser import optimize_sigma_NL

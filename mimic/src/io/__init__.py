@@ -14,10 +14,14 @@ from .constraints import save_constraints
 from .constraints import load_constraints
 
 # Data file
-from .datafile import _save_correlators_npz
-from .datafile import _load_correlators_npz
-from .datafile import save_correlators
-from .datafile import load_correlators
+from .datafile import _save_analytic_correlators_npz
+from .datafile import _load_analytic_correlators_npz
+from .datafile import save_analytic_correlators
+from .datafile import load_analytic_correlators
+from .datafile import _save_grid_correlators_npz
+from .datafile import _load_grid_correlators_npz
+from .datafile import save_grid_correlators
+from .datafile import load_grid_correlators
 
 # Error management
 from .error import _error_if_true

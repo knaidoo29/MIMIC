@@ -28,7 +28,7 @@ def _load_constraints_ice(fname):
     error._break4error(ERROR)
     # Load data file
     data = np.loadtxt(fname, unpack=True)
-    c_type = data[0]-1
+    c_type = data[0]
     x, y, z = data[1], data[2], data[3]
     c, c_err = data[4], data[5]
     ex, ey, ez = data[6], data[7], data[8],
@@ -55,7 +55,7 @@ def _save_constraints_ice(fname, x, y, z, ex, ey, ez, c, c_err, c_type):
     cons_type = np.copy(c_type) + 1
     cons_type = cons_type.astype('int')
     RG = np.zeros(len(x))
-    data = np.column_stack([cons_type, x, y, z, u, u_err, ex, ey, ez, RG])
+    data = np.column_stack([cons_type, x, y, z, c, c_err, ex, ey, ez, RG])
     np.savetxt(fname, data, fmt="%i\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f")
 
 
